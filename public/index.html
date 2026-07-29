@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Finance Dashboard Dark Theme</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-main: #131722;
+      --bg-card: #1e222d;
+      --text-main: #d1d4dc;
+      --text-muted: #787b86;
+      --border: #2a2e39;
+      --c-chi: #ef5350; /* Đỏ */
+      --c-thu: #26a69a; /* Xanh ngọc */
+      --c-dautu: #2962ff; /* Xanh dương */
+    }
+    
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg-main); color: var(--text-main); margin: 0; padding: 20px; }
+    
+    .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .card { background: var(--bg-card); border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid var(--border); }
+    .card-title { font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: #fff; }
+    
+    /* Hàng 1: Biểu đồ */
+    .row-charts { display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; }
+    .chart-container { position: relative; height: 250px; width: 100%; }
+    
+    /* Hàng 2: Form & Bảng */
+    .row-data { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+    
+    /* Form */
+    .form-group { margin-bottom: 15px; }
+    label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px; }
+    input, select { width: 100%; background: var(--bg-main); border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; outline: none; }
+    input:focus, select:focus { border-color: var(--c-dautu); }
+    button.btn-submit { width: 100%; background: var(--c-dautu); color: #fff; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+    button.btn-submit:hover { opacity: 0.9; }
+    
+    /* Table */
+    .table-responsive { overflow-x: auto; max-height: 400px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+    th { color: var(--text-muted); padding: 12px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-card); font-size: 12px; }
+    td { padding: 12px 10px; border-bottom: 1px solid var(--border); color: var(--text-main); }
+    tr:hover { background: rgba(255,255,255,0.02); }
+    
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .badge.chi { color: var(--c-chi); background: rgba(239,83,80,0.1); }
+    .badge.thu { color: var(--c-thu); background: rgba(38,166,154,0.1); }
+    .badge.dautu { color: var(--c-dautu); background: rgba(41,98,255,0.1); }
+    
+    .text-chi { color: var(--c-chi); font-weight: bold; }
+    .text-thu { color: var(--c-thu); font-weight: bold; }
+    
+    .action-btn { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 16px; margin-right: 5px; transition: color 0.2s; }
+    .action-btn.delete:hover { color: var(--c-chi); }
+    
+    @media(max-width: 768px) {
+      .row-charts, .row-data { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Hàng 1: Charts -->
+    <div class="row-charts">
+      <div class="card">
+        <h3 class="card-title">🍩 Cơ Cấu Theo Danh Mục</h3>
+        <div class="chart-container"><canvas id="doughnutChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">📊 So Sánh Thu / Đầu Tư / Chi</h3>
+        <div class="chart-container"><canvas id="barChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Hàng 2: Nhập & Bảng -->
+    <div class="row-data">
+      
+      <!-- Form Thêm Giao Dịch -->
+      <div class="card">
+        <h3 class="card-title">➕ Thêm Giao Dịch</h3>
+        <form id="addForm">
+          <div class="form-group">
+            <label>Số Tiền (VNĐ)</label>
+            <input type="number" id="f_amount" placeholder="VD: 50000" required>
+          </div>
+          <div class="form-group">
+            <label>Loại Giao Dịch</label>
+            <select id="f_type">
+              <option value="CHI">🔴 Chi Tiêu</option>
+              <option value="THU">🟢 Thu Nhập</option>
+              <option value="DAUTU">🔵 Đầu Tư</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Danh Mục</label>
+            <input type="text" id="f_category" placeholder="VD: Ăn uống, Lương..." required>
+          </div>
+          <div class="form-group">
+            <label>Ghi Chú</label>
+            <input type="text" id="f_note" placeholder="Mua kem cho bé..." required>
+          </div>
+          <button type="submit" class="btn-submit">Lưu Giao Dịch</button>
+        </form>
+      </div>
+
+      <!-- Bảng Nhật Ký -->
+      <div class="card">
+        <h3 class="card-title">📋 Nhật Ký Giao Dịch Gần Đây</h3>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>LOẠI</th>
+                <th>GHI CHÚ</th>
+                <th>DANH MỤC</th>
+                <th>NGUỒN</th>
+                <th>SỐ TIỀN</th>
+                <th>THỜI GIAN</th>
+                <th>HÀNH ĐỘNG</th>
+              </tr>
+            </thead>
+            <tbody id="table-body">
+              <!-- Render JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let allData = [];
+    let doughnutChart, barChart;
+
+    const formatMoney = (val) => new Intl.NumberFormat('vi-VN').format(val) + ' đ';
+    const formatDate = (dateStr) => {
+      const d = new Date(dateStr);
+      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    };
+
+    // --- RENDER BẢNG ---
+    function renderTable() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '';
+      allData.forEach(tx => {
+        const isChi = tx.type === 'CHI' || !tx.type;
+        const typeClass = isChi ? 'chi' : (tx.type === 'THU' ? 'thu' : 'dautu');
+        const typeLabel = isChi ? 'CHI' : tx.type;
+        const amountDisplay = isChi ? `-${formatMoney(tx.amount)}` : `+${formatMoney(tx.amount)}`;
+        const textClass = isChi ? 'text-chi' : 'text-thu';
+        const source = tx.source || 'BOT';
+
+        tbody.innerHTML += `
+          <tr>
+            <td><span class="badge ${typeClass}">${typeLabel}</span></td>
+            <td>${tx.note}</td>
+            <td>${tx.category}</td>
+            <td style="font-size:11px; color:#787b86;">${source}</td>
+            <td class="${textClass}">${amountDisplay}</td>
+            <td>${formatDate(tx.createdAt)}</td>
+            <td>
+              <button class="action-btn delete" onclick="deleteTx('${tx._id}')" title="Xóa">🗑️</button>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    // --- RENDER CHARTS ---
+    function renderCharts() {
+      // Data tính toán
+      let sumThu = 0, sumChi = 0, sumDauTu = 0;
+      let categories = {};
+
+      allData.forEach(tx => {
+        const isChi = tx.type === 'CHI' || !tx.type;
+        if (isChi) {
+          sumChi += tx.amount;
+          categories[tx.category] = (categories[tx.category] || 0) + tx.amount;
+        } else if (tx.type === 'THU') {
+          sumThu += tx.amount;
+        } else if (tx.type === 'DAUTU') {
+          sumDauTu += tx.amount;
+        }
+      });
+
+      // 1. Doughnut Chart (Cơ cấu CHI)
+      const dCtx = document.getElementById('doughnutChart').getContext('2d');
+      if (doughnutChart) doughnutChart.destroy();
+      doughnutChart = new Chart(dCtx, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(categories).length ? Object.keys(categories) : ['Trống'],
+          datasets: [{
+            data: Object.keys(categories).length ? Object.values(categories) : [1],
+            backgroundColor: ['#ef5350', '#ab47bc', '#42a5f5', '#ffca28', '#26a69a'],
+            borderWidth: 0
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#d1d4dc' } } }, cutout: '65%' }
+      });
+
+      // 2. Bar Chart (Thu / Đầu tư / Chi)
+      const bCtx = document.getElementById('barChart').getContext('2d');
+      if (barChart) barChart.destroy();
+      barChart = new Chart(bCtx, {
+        type: 'bar',
+        data: {
+          labels: ['Tổng Thu', 'Tổng Đầu Tư', 'Tổng Chi'],
+          datasets: [{
+            label: 'Số Tiền',
+            data: [sumThu, sumDauTu, sumChi],
+            backgroundColor: ['#26a69a', '#2962ff', '#ef5350'],
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { grid: { color: '#2a2e39' }, ticks: { color: '#787b86' } },
+            x: { grid: { display: false }, ticks: { color: '#787b86' } }
+          }
+        }
+      });
+    }
+
+    function updateUI() { renderTable(); renderCharts(); }
+
+    // --- GỬI API TỪ WEB ---
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        amount: parseFloat(document.getElementById('f_amount').value),
+        type: document.getElementById('f_type').value,
+        category: document.getElementById('f_category').value,
+        note: document.getElementById('f_note').value
+      };
+      
+      await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      document.getElementById('addForm').reset(); // Reset form
+    });
+
+    async function deleteTx(id) {
+      if(confirm('Xóa giao dịch này?')) {
+        await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      }
+    }
+
+    // --- SOCKET & KHỞI TẠO ---
+    socket.on('new_transaction', (tx) => { allData.unshift(tx); updateUI(); });
+    socket.on('delete_transaction', (id) => { allData = allData.filter(t => t._id !== id); updateUI(); });
+
+    async function loadData() {
+      const res = await fetch('/api/transactions');
+      allData = await res.json();
+      updateUI();
+    }
+    loadData();
+  </script>
+</body>
+</html>

@@ -13,13 +13,37 @@ const settingSchema = new mongoose.Schema({
 });
 const Setting = mongoose.models.Setting || mongoose.model('Setting', settingSchema);
 
-// HÀM LẤY THỜI GIAN CHUẨN MÚI GIỜ VIỆT NAM (Tránh lệch giờ trên Render)
-function getVietnamTime(date = new Date()) {
-  const options = { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false };
-  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(date);
-  const partMap = {};
-  parts.forEach(p => partMap[p.type] = p.value);
-  return new Date(`${partMap.year}-${partMap.month}-${partMap.day}T${partMap.hour}:${partMap.minute}:${partMap.second}`);
+// HÀM TÍNH MỐC THỜI GIAN CHUẨN XÁC CHO MONGODB (Múi giờ VN UTC+7)
+function getTimeBounds(period) {
+  const now = new Date();
+  const options = { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' };
+  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(now);
+  
+  let year, month, day;
+  parts.forEach(p => {
+    if (p.type === 'year') year = parseInt(p.value);
+    if (p.type === 'month') month = parseInt(p.value);
+    if (p.type === 'day') day = parseInt(p.value);
+  });
+
+  // Mốc 0h00 và 23h59 giả định
+  let startVn = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+  let endVn = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+
+  if (period === 'hôm qua') {
+    startVn.setUTCDate(startVn.getUTCDate() - 1);
+    endVn.setUTCDate(endVn.getUTCDate() - 1);
+  } else if (period === 'tháng này') {
+    startVn = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+    endVn = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+  }
+
+  // Chuyển về chuẩn UTC thực để query Database (-7 tiếng)
+  const offset = 7 * 60 * 60 * 1000;
+  return { 
+    start: new Date(startVn.getTime() - offset), 
+    end: new Date(endVn.getTime() - offset) 
+  };
 }
 
 // 1. Lệnh /start
@@ -27,7 +51,7 @@ bot.start((ctx) => {
   return ctx.reply('🚀 **Quản Gia Tài Chính AI** đã sẵn sàng!\n\n👉 **Gửi ảnh bill:** AI tự động đọc & lưu.\n👉 **Gõ chữ:** "50k ăn sáng", "2tr lương"\n\n🛠 **CÁC LỆNH HỖ TRỢ:**\n/ngansach <số tiền> - Cài hạn mức (VD: /ngansach 10tr)\n/thongke - Phân tích chi tiêu tháng này\n/tim <từ khóa> - Tìm kiếm giao dịch cũ\n/excel - Tải dữ liệu ra file Excel\n/xoa - Xóa giao dịch', { parse_mode: 'Markdown' });
 });
 
-// 2. Lệnh /ngansach - Cài đặt hạn mức chi tiêu
+// 2. Lệnh /ngansach
 bot.command('ngansach', async (ctx) => {
   const userId = ctx.from.id;
   const text = ctx.message.text.replace('/ngansach', '').trim();
@@ -54,14 +78,11 @@ bot.command('ngansach', async (ctx) => {
   }
 });
 
-// 3. Lệnh /thongke - Phân tích & Cảnh báo ngân sách theo thời gian VN
+// 3. Lệnh /thongke - Đã fix múi giờ
 bot.command('thongke', async (ctx) => {
   const userId = ctx.from.id;
   try {
-    const nowVN = getVietnamTime();
-    const start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
-    const end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
-
+    const { start, end } = getTimeBounds('tháng này');
     const txs = await Transaction.find({ telegramUserId: userId, createdAt: { $gte: start, $lte: end }, type: 'CHI' });
     const userSetting = await Setting.findOne({ telegramUserId: userId });
     const BUDGET_LIMIT = userSetting && userSetting.budget ? userSetting.budget : 10000000;
@@ -101,7 +122,7 @@ bot.command('thongke', async (ctx) => {
   }
 });
 
-// 4. Lệnh /tim <từ khóa>
+// 4. Lệnh /tim
 bot.hears(/^\/tim (.+)/i, async (ctx) => {
   const keyword = ctx.match[1].trim();
   const userId = ctx.from.id;
@@ -140,7 +161,7 @@ bot.command('excel', async (ctx) => {
   }
 });
 
-// 6. Lệnh /xoa & Xử lý Callback Xóa
+// 6. Lệnh /xoa
 bot.command('xoa', async (ctx) => {
   const userId = ctx.from.id;
   try {
@@ -149,7 +170,7 @@ bot.command('xoa', async (ctx) => {
     await ctx.reply('🗑️ **Chọn giao dịch cần xóa:**', { parse_mode: 'Markdown' });
     for (let tx of txs) {
       const amt = new Intl.NumberFormat('vi-VN').format(tx.amount);
-      const time = new Date(tx.createdAt).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
+      const time = new Date(tx.createdAt).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit', timeZone: 'Asia/Ho_Chi_Minh'});
       const typeLabel = tx.type === 'THU' ? '🟢' : '🔴';
       await ctx.reply(`${typeLabel} [${time}] ${tx.note} : ${amt}đ`, Markup.inlineKeyboard([Markup.button.callback('❌ Xóa', `del_${tx._id}`)]));
     }
@@ -164,7 +185,7 @@ bot.action(/^del_(.+)$/, async (ctx) => {
       if (global.io) global.io.emit('delete_transaction', txId);
       await ctx.editMessageText(`✅ **Đã xóa:** ${deletedTx.note} (-${new Intl.NumberFormat('vi-VN').format(deletedTx.amount)}đ)`, { parse_mode: 'Markdown' });
     } else {
-      await ctx.answerCbQuery('⚠️ Giao dịch này đã được xóa trước đó!');
+      await ctx.answerCbQuery('⚠️ Giao dịch này đã bị xóa trước đó!');
     }
   } catch (err) {}
 });
@@ -204,15 +225,15 @@ bot.on('photo', async (ctx) => {
     await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
     return ctx.reply(`✅ **Đã ghi nhận!**\n\n📌 Loại: ${typeLabelMap[parsedData.type] || '🔴 Chi Tiêu'}\n💰 Số tiền: ${formattedAmount}\n📝 Nội dung: ${parsedData.note}\n🏷️ Danh mục: ${parsedData.category}`, {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([Markup.button.callback('❌ Hủy / Xóa giao dịch này', `del_${newTx._id}`)])
+      ...Markup.inlineKeyboard([Markup.button.callback('❌ Hủy / Xóa giao dịch', `del_${newTx._id}`)])
     });
   } catch (err) {
     try { await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id); } catch(e){}
-    return ctx.reply('❌ AI gặp sự cố khi đọc ảnh. Thử gõ text nhé!');
+    return ctx.reply('❌ AI gặp sự cố khi đọc ảnh. Bạn gõ tay giúp mình nhé!');
   }
 });
 
-// 8. XỬ LÝ CHỮ (Thống kê theo giờ VN & Ghi nhanh)
+// 8. XỬ LÝ CHỮ (Thống kê & Ghi nhanh đã fix)
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
   const lowerText = text.toLowerCase();
@@ -220,42 +241,29 @@ bot.on('text', async (ctx) => {
   
   if (text.startsWith('/')) return;
 
-  // HỎI THỐNG KÊ (Hôm nay, hôm qua, tháng này)
+  // XỬ LÝ HỎI THỐNG KÊ 
   if (lowerText.includes('chi') || lowerText.includes('tiêu')) {
     try {
-      const nowVN = getVietnamTime();
-      let start = new Date(nowVN);
-      let end = new Date(nowVN);
+      let period = '';
       let timeLabel = '';
 
-      if (lowerText.includes('hôm nay')) {
-        start.setHours(0, 0, 0, 0); 
-        end.setHours(23, 59, 59, 999); 
-        timeLabel = 'Hôm nay';
-      } else if (lowerText.includes('hôm qua')) {
-        start.setDate(start.getDate() - 1); 
-        start.setHours(0, 0, 0, 0);
-        end.setDate(end.getDate() - 1); 
-        end.setHours(23, 59, 59, 999); 
-        timeLabel = 'Hôm qua';
-      } else if (lowerText.includes('tháng này')) {
-        start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
-        end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
-        timeLabel = 'Tháng này';
-      }
+      if (lowerText.includes('hôm nay')) { period = 'hôm nay'; timeLabel = 'Hôm nay'; }
+      else if (lowerText.includes('hôm qua')) { period = 'hôm qua'; timeLabel = 'Hôm qua'; }
+      else if (lowerText.includes('tháng này')) { period = 'tháng này'; timeLabel = 'Tháng này'; }
 
-      if (timeLabel !== '') {
+      if (period !== '') {
+        const { start, end } = getTimeBounds(period);
         const txs = await Transaction.find({ telegramUserId: userId, createdAt: { $gte: start, $lte: end }, type: 'CHI' });
         const total = txs.reduce((sum, tx) => sum + tx.amount, 0);
         return ctx.reply(`📊 ${timeLabel} bạn đã chi: **${new Intl.NumberFormat('vi-VN').format(total)} đ**`, { parse_mode: 'Markdown' });
       }
     } catch (e) {
       console.error('Lỗi truy vấn text thống kê:', e);
-      return ctx.reply('❌ Lỗi thống kê.');
+      return ctx.reply('❌ Lỗi xử lý thống kê.');
     }
   }
 
-  // GHI NHANH
+  // XỬ LÝ GHI NHANH
   const amountMatch = text.match(/(\d+[\d\.]*)\s*(k|tr)?/i);
   if (!amountMatch) {
       if (lowerText.includes('nhắc nhở') || lowerText.includes('sổ nợ')) {
@@ -274,7 +282,7 @@ bot.on('text', async (ctx) => {
   const lowerNote = note.toLowerCase();
 
   if (lowerNote.includes('lương') || lowerNote.includes('thu')) { type = 'THU'; category = 'Thu nhập'; }
-  else if (lowerNote.includes('ăn') || lowerNote.includes('cà phê')) category = 'Ăn uống';
+  else if (lowerNote.includes('ăn') || lowerNote.includes('cà phê') || lowerNote.includes('cafe')) category = 'Ăn uống';
   else if (lowerNote.includes('xăng') || lowerNote.includes('xe') || lowerNote.includes('grab')) category = 'Di chuyển';
   else if (lowerNote.includes('mua') || lowerNote.includes('sắm')) category = 'Mua sắm';
 
@@ -292,9 +300,12 @@ bot.on('text', async (ctx) => {
       ...Markup.inlineKeyboard([Markup.button.callback('❌ Hủy / Xóa', `del_${newTx._id}`)])
     });
   } catch (err) {
-    console.error('Lỗi lưu ghi nhanh:', err);
     return ctx.reply('❌ Có lỗi lưu database!');
   }
 });
+
+// BẮT SỰ KIỆN TẮT BOT AN TOÀN (Ngăn chặn lỗi 409 Conflict trên Render)
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 module.exports = bot;

@@ -5,6 +5,9 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const { Telegraf, Markup } = require('telegraf');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+const path = require('path');
 
 const Transaction = require('./models/Transaction');
 const Reminder = require('./models/Reminder');
@@ -17,7 +20,7 @@ global.io = io;
 app.use(express.json());
 app.use(express.static('public'));
 
-// Khởi tạo Gemini AI chuẩn Google
+// Khởi tạo Gemini AI
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "AQ.Ab8RN6J6NMdLfDr0gZUDqbnAl-IcRlaGqgeIDn5sNGdz3yoH8Q";
 let aiModel = null;
 try {
@@ -34,7 +37,111 @@ mongoose.connect(mongoURI)
   .then(() => console.log('✅ Đã kết nối MongoDB thành công'))
   .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
-// ================= API ROUTES (WEB) =================
+// ==================== HỈM XUẤT EXCEL & THỐNG KÊ ====================
+
+async function generateExcelReport(userId = null) {
+  try {
+    const query = userId ? { telegramUserId: userId } : {};
+    const transactions = await Transaction.find(query).sort({ createdAt: -1 });
+    
+    if (transactions.length === 0) return null;
+
+    const workbook = new ExcelJS.Workbook();
+    
+    // Sheet 1: Chi tiết giao dịch
+    const sheet1 = workbook.addWorksheet('Giao dịch');
+    sheet1.columns = [
+      { header: 'Danh mục', key: 'category', width: 20 },
+      { header: 'Số tiền (VNĐ)', key: 'amount', width: 15 },
+      { header: 'Loại', key: 'type', width: 10 },
+      { header: 'Nguồn', key: 'source', width: 10 },
+      { header: 'Ngày tạo', key: 'createdAt', width: 20 },
+      { header: 'Ghi chú', key: 'note', width: 30 }
+    ];
+
+    transactions.forEach(tx => {
+      sheet1.addRow({
+        category: tx.category,
+        amount: tx.amount.toLocaleString('vi-VN'),
+        type: tx.type,
+        source: tx.source || 'WEB',
+        createdAt: new Date(tx.createdAt).toLocaleString('vi-VN'),
+        note: tx.note || ''
+      });
+    });
+
+    sheet1.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+
+    // Sheet 2: Thống kê theo danh mục
+    const categoryStats = {};
+    transactions.forEach(tx => {
+      if (!categoryStats[tx.category]) categoryStats[tx.category] = 0;
+      categoryStats[tx.category] += tx.amount;
+    });
+
+    const sheet2 = workbook.addWorksheet('Thống kê');
+    sheet2.columns = [
+      { header: 'Danh mục', key: 'category', width: 25 },
+      { header: 'Tổng chi (VNĐ)', key: 'total', width: 20 },
+      { header: 'Tỷ lệ (%)', key: 'percentage', width: 15 }
+    ];
+
+    const totalAmount = Object.values(categoryStats).reduce((a, b) => a + b, 0);
+    Object.entries(categoryStats)
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([cat, amount]) => {
+        sheet2.addRow({
+          category: cat,
+          total: amount.toLocaleString('vi-VN'),
+          percentage: ((amount / totalAmount) * 100).toFixed(1)
+        });
+      });
+
+    sheet2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: 'FF70AD47' };
+
+    // Sheet 3: Tóm tắt tháng
+    const sheet3 = workbook.addWorksheet('Tóm tắt');
+    const now = new Date();
+    const thisMonth = transactions.filter(t => {
+      const txDate = new Date(t.createdAt);
+      return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+    });
+
+    const thisMonthTotal = thisMonth.reduce((sum, t) => sum + t.amount, 0);
+    const avgDaily = thisMonthTotal / Math.max(1, thisMonth.length);
+
+    sheet3.columns = [
+      { header: 'Chỉ số', key: 'metric', width: 25 },
+      { header: 'Giá trị', key: 'value', width: 25 }
+    ];
+
+    sheet3.addRows([
+      { metric: '📊 Tổng chi tháng này', value: thisMonthTotal.toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '📝 Số giao dịch tháng này', value: thisMonth.length },
+      { metric: '📈 Trung bình/ngày', value: avgDaily.toFixed(0).toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '💰 Tổng chi toàn thời gian', value: totalAmount.toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '📌 Danh mục nhiều nhất', value: Object.keys(categoryStats).reduce((a, b) => categoryStats[a] > categoryStats[b] ? a : b) }
+    ]);
+
+    sheet3.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: 'FFC65911' };
+
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = `Bao_Cao_Tai_Chinh_${timestamp}.xlsx`;
+    const filepath = path.join('/tmp', filename);
+
+    await workbook.xlsx.writeFile(filepath);
+    return filepath;
+  } catch (err) {
+    console.error('Lỗi tạo Excel:', err);
+    return null;
+  }
+}
+
+// ==================== API ROUTES (WEB) =================
+
 app.get('/api/transactions', async (req, res) => {
   try {
     const transactions = await Transaction.find().sort({ createdAt: -1 });
@@ -65,6 +172,64 @@ app.delete('/api/transactions/:id', async (req, res) => {
   }
 });
 
+// API thống kê
+app.get('/api/stats', async (req, res) => {
+  try {
+    const transactions = await Transaction.find().sort({ createdAt: -1 });
+    
+    const now = new Date();
+    const thisMonth = transactions.filter(t => {
+      const txDate = new Date(t.createdAt);
+      return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+    });
+
+    const categoryStats = {};
+    transactions.forEach(tx => {
+      if (!categoryStats[tx.category]) categoryStats[tx.category] = 0;
+      categoryStats[tx.category] += tx.amount;
+    });
+
+    const totalAmount = Object.values(categoryStats).reduce((a, b) => a + b, 0);
+    const thisMonthTotal = thisMonth.reduce((sum, t) => sum + t.amount, 0);
+
+    res.json({
+      totalTransactions: transactions.length,
+      totalAmount: totalAmount,
+      thisMonthTotal: thisMonthTotal,
+      thisMonthCount: thisMonth.length,
+      avgDaily: thisMonthTotal / Math.max(1, thisMonth.length),
+      categoryStats: Object.entries(categoryStats)
+        .sort((a, b) => b[1] - a[1])
+        .map(([category, total]) => ({
+          category,
+          total,
+          percentage: ((total / totalAmount) * 100).toFixed(1)
+        }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
+// API xuất Excel
+app.get('/api/export-excel', async (req, res) => {
+  try {
+    const filepath = await generateExcelReport();
+    
+    if (!filepath) {
+      return res.status(404).json({ error: 'Không có dữ liệu' });
+    }
+
+    res.download(filepath, 'Bao_Cao_Tai_Chinh.xlsx', (err) => {
+      if (err) console.error('Lỗi download:', err);
+      fs.unlinkSync(filepath);
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
+// API Reminders
 app.get('/api/reminders', async (req, res) => {
   try {
     const reminders = await Reminder.find().sort({ dueDate: 1 });
@@ -99,7 +264,7 @@ app.post('/api/reminders/:id/pay', async (req, res) => {
   try {
     const reminder = await Reminder.findById(req.params.id);
     if (!reminder || reminder.isPaid) {
-      return res.status(404).json({ error: 'Không tìm thấy lịch hẹn hoặc đã thanh toán' });
+      return res.status(404).json({ error: 'Không tìm thấy hoặc đã thanh toán' });
     }
 
     const newTx = await Transaction.create({
@@ -124,14 +289,93 @@ app.post('/api/reminders/:id/pay', async (req, res) => {
 });
 
 // ================= TELEGRAM BOT & GEMINI AI =================
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN || "8902520402:AAFqK83aAdDO1xp6R0WHi6p27mrdtOd7EuM";
 if (BOT_TOKEN) {
   const bot = new Telegraf(BOT_TOKEN);
 
   bot.start((ctx) => {
-    ctx.reply('🤖 Chào bạn! Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n📌 **Hướng dẫn:**\n- Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng `ai` (VD: `ai tôi nên phân bổ chi tiêu thế nào?`)\n- Xóa gần nhất: `/xoa`');
+    ctx.reply(
+      '🤖 **Chào bạn!** Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n' +
+      '📌 **HƯỚNG DẪN SỬ DỤNG:**\n' +
+      '• Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n' +
+      '• Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n' +
+      '• 📊 Xem thống kê: `/thongke`\n' +
+      '• 📥 Xuất Excel: `/excel`\n' +
+      '• 🤖 Hỏi AI: `ai tôi nên tiết kiệm thế nào?`\n' +
+      '• ❌ Xóa gần nhất: `/xoa`\n\n' +
+      '💡 _Hãy bắt đầu ghi chi tiêu ngay!_',
+      { parse_mode: 'Markdown' }
+    );
   });
 
+  // Lệnh /thongke
+  bot.command('thongke', async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const transactions = await Transaction.find({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
+      
+      if (transactions.length === 0) {
+        return ctx.reply('📭 Chưa có giao dịch nào.');
+      }
+
+      const categoryStats = {};
+      transactions.forEach(tx => {
+        if (!categoryStats[tx.category]) categoryStats[tx.category] = 0;
+        categoryStats[tx.category] += tx.amount;
+      });
+
+      const totalAmount = Object.values(categoryStats).reduce((a, b) => a + b, 0);
+      const now = new Date();
+      const thisMonth = transactions.filter(t => {
+        const txDate = new Date(t.createdAt);
+        return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+      });
+      const thisMonthTotal = thisMonth.reduce((sum, t) => sum + t.amount, 0);
+
+      let report = `📊 **BÁO CÁO THÁNG NÀY**\n`;
+      report += `💰 Tổng chi: ${thisMonthTotal.toLocaleString('vi-VN')} VNĐ\n`;
+      report += `📝 Số giao dịch: ${thisMonth.length}\n`;
+      report += `📈 Trung bình/ngày: ${(thisMonthTotal / Math.max(1, thisMonth.length)).toFixed(0).toLocaleString('vi-VN')} VNĐ\n\n`;
+      
+      report += `📌 **TOP DANH MỤC**\n`;
+      Object.entries(categoryStats)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .forEach(([cat, amount], idx) => {
+          const pct = ((amount / totalAmount) * 100).toFixed(1);
+          report += `${idx + 1}. ${cat}: ${amount.toLocaleString('vi-VN')} VNĐ (${pct}%)\n`;
+        });
+
+      ctx.reply(report, { parse_mode: 'Markdown' });
+    } catch (err) {
+      console.error('Lỗi thống kê:', err);
+      ctx.reply('❌ Lỗi khi lấy thống kê.');
+    }
+  });
+
+  // Lệnh /excel
+  bot.command('excel', async (ctx) => {
+    try {
+      await ctx.sendChatAction('upload_document');
+      const filepath = await generateExcelReport(ctx.from.id);
+      
+      if (!filepath) {
+        return ctx.reply('📭 Chưa có dữ liệu để xuất.');
+      }
+
+      await ctx.replyWithDocument(
+        { source: filepath },
+        { caption: `📊 Báo cáo tài chính - ${new Date().toLocaleDateString('vi-VN')}` }
+      );
+
+      fs.unlinkSync(filepath);
+    } catch (err) {
+      console.error('Lỗi xuất Excel:', err);
+      ctx.reply('❌ Lỗi khi xuất file Excel.');
+    }
+  });
+
+  // Hẹn lịch
   bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
     try {
       const title = ctx.match[1];
@@ -148,13 +392,17 @@ if (BOT_TOKEN) {
 
       await Reminder.create({ telegramUserId: userId, title, amount: rawAmount, dueDate });
       io.emit('reminder_updated');
-      ctx.reply(`📅 **Đã đặt lịch thành công!**\n- ${title}: ${rawAmount.toLocaleString('vi-VN')} VNĐ (Ngày ${dateStr})`);
+      ctx.reply(
+        `📅 **Đã đặt lịch thành công!**\n- ${title}: ${rawAmount.toLocaleString('vi-VN')} VNĐ (Ngày ${dateStr})`,
+        { parse_mode: 'Markdown' }
+      );
     } catch (err) {
       console.error(err);
       ctx.reply('❌ Lỗi khi đặt lịch hẹn.');
     }
   });
 
+  // Ghi giao dịch nhanh
   bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
@@ -181,7 +429,7 @@ if (BOT_TOKEN) {
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('❌ Xóa giao dịch này', `delete_tx_${tx._id}`)]
+            [Markup.button.callback('❌ Xóa', `delete_tx_${tx._id}`)]
           ])
         }
       );
@@ -191,6 +439,7 @@ if (BOT_TOKEN) {
     }
   });
 
+  // Hỏi AI
   bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
@@ -200,29 +449,33 @@ if (BOT_TOKEN) {
         await ctx.sendChatAction('typing');
         const queryText = text.replace(/^(ai|gemini)\s+/i, '');
         
-        const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(15);
+        const transactions = await Transaction.find({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 }).limit(15);
         const summary = transactions.map(t => `- ${t.category}: ${t.amount.toLocaleString('vi-VN')}đ (${t.type})`).join('\n');
 
-        const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi/Yêu cầu của tôi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
+        const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
         
         const result = await aiModel.generateContent(prompt);
         const responseText = result.response.text();
 
-        return ctx.reply(responseText || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời lúc này.');
+        return ctx.reply(responseText || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời.');
       } catch (err) {
         console.error('Lỗi Gemini AI:', err);
-        return ctx.reply('❌ Đã xảy ra lỗi khi kết nối với Gemini AI.');
+        return ctx.reply('❌ Lỗi khi kết nối với Gemini AI.');
       }
     }
   });
 
+  // Xóa qua nút
   bot.action(/^delete_tx_(.+)$/, async (ctx) => {
     try {
       const txId = ctx.match[1];
       const deletedTx = await Transaction.findByIdAndDelete(txId);
       if (deletedTx) {
         io.emit('delete_transaction', txId);
-        await ctx.editMessageText(`🗑️ **Đã xóa giao dịch thành công!**\n(${deletedTx.category} - ${deletedTx.amount.toLocaleString('vi-VN')} VNĐ)`, { parse_mode: 'Markdown' });
+        await ctx.editMessageText(
+          `🗑️ **Đã xóa thành công!**\n(${deletedTx.category} - ${deletedTx.amount.toLocaleString('vi-VN')} VNĐ)`,
+          { parse_mode: 'Markdown' }
+        );
       } else {
         await ctx.answerCbQuery('Giao dịch không tồn tại.');
       }
@@ -232,21 +485,22 @@ if (BOT_TOKEN) {
     }
   });
 
+  // Xóa giao dịch gần nhất
   bot.command('xoa', async (ctx) => {
     try {
       const lastTx = await Transaction.findOne({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
-      if (!lastTx) return ctx.reply('📭 Không tìm thấy giao dịch nào gần đây.');
+      if (!lastTx) return ctx.reply('📭 Không tìm thấy giao dịch nào.');
 
       await Transaction.findByIdAndDelete(lastTx._id);
       io.emit('delete_transaction', lastTx._id);
-      ctx.reply(`🗑️ Đã xóa giao dịch: ${lastTx.category} - ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
+      ctx.reply(`🗑️ Đã xóa: ${lastTx.category} - ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
     } catch (err) {
       console.error(err);
       ctx.reply('❌ Lỗi khi xóa.');
     }
   });
 
-  bot.launch().then(() => console.log('🤖 Telegram Bot & Gemini AI đang chạy mượt mà'));
+  bot.launch().then(() => console.log('🤖 Telegram Bot & Gemini AI đang chạy!'));
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }

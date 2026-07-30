@@ -57,17 +57,16 @@ bot.command('ngansach', async (ctx) => {
 // 3. Lệnh /thongke - Phân tích & Cảnh báo ngân sách theo thời gian VN
 bot.command('thongke', async (ctx) => {
   const userId = ctx.from.id;
-  const nowVN = getVietnamTime();
-  
-  const start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
-  const end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
-
   try {
+    const nowVN = getVietnamTime();
+    const start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
+    const end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
+
     const txs = await Transaction.find({ telegramUserId: userId, createdAt: { $gte: start, $lte: end }, type: 'CHI' });
     const userSetting = await Setting.findOne({ telegramUserId: userId });
-    const BUDGET_LIMIT = userSetting && userSetting.budget ? userSetting.budget : 10000000; // Mặc định 10tr
+    const BUDGET_LIMIT = userSetting && userSetting.budget ? userSetting.budget : 10000000;
 
-    if (txs.length === 0) return ctx.reply('Tháng này bạn chưa tiêu đồng nào!');
+    if (txs.length === 0) return ctx.reply('📊 Tháng này bạn chưa có khoản chi tiêu nào!');
 
     let totalSpent = 0;
     const categoryTotals = {};
@@ -97,6 +96,7 @@ bot.command('thongke', async (ctx) => {
 
     return ctx.reply(report, { parse_mode: 'Markdown' });
   } catch (err) {
+    console.error('Lỗi thongke:', err);
     return ctx.reply('❌ Lỗi tạo thống kê.');
   }
 });
@@ -220,37 +220,38 @@ bot.on('text', async (ctx) => {
   
   if (text.startsWith('/')) return;
 
-  // HỎI THỐNG KÊ (Hôm nay, hôm qua, tháng này - Đã chuẩn múi giờ VN)
+  // HỎI THỐNG KÊ (Hôm nay, hôm qua, tháng này)
   if (lowerText.includes('chi') || lowerText.includes('tiêu')) {
-    const nowVN = getVietnamTime();
-    let start = new Date(nowVN);
-    let end = new Date(nowVN);
-    let timeLabel = '';
+    try {
+      const nowVN = getVietnamTime();
+      let start = new Date(nowVN);
+      let end = new Date(nowVN);
+      let timeLabel = '';
 
-    if (lowerText.includes('hôm nay')) {
-      start.setHours(0, 0, 0, 0); 
-      end.setHours(23, 59, 59, 999); 
-      timeLabel = 'Hôm nay';
-    } else if (lowerText.includes('hôm qua')) {
-      start.setDate(start.getDate() - 1); 
-      start.setHours(0, 0, 0, 0);
-      end.setDate(end.getDate() - 1); 
-      end.setHours(23, 59, 59, 999); 
-      timeLabel = 'Hôm qua';
-    } else if (lowerText.includes('tháng này')) {
-      start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
-      end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
-      timeLabel = 'Tháng này';
-    }
+      if (lowerText.includes('hôm nay')) {
+        start.setHours(0, 0, 0, 0); 
+        end.setHours(23, 59, 59, 999); 
+        timeLabel = 'Hôm nay';
+      } else if (lowerText.includes('hôm qua')) {
+        start.setDate(start.getDate() - 1); 
+        start.setHours(0, 0, 0, 0);
+        end.setDate(end.getDate() - 1); 
+        end.setHours(23, 59, 59, 999); 
+        timeLabel = 'Hôm qua';
+      } else if (lowerText.includes('tháng này')) {
+        start = new Date(nowVN.getFullYear(), nowVN.getMonth(), 1, 0, 0, 0);
+        end = new Date(nowVN.getFullYear(), nowVN.getMonth() + 1, 0, 23, 59, 59);
+        timeLabel = 'Tháng này';
+      }
 
-    if (timeLabel !== '') {
-      try {
+      if (timeLabel !== '') {
         const txs = await Transaction.find({ telegramUserId: userId, createdAt: { $gte: start, $lte: end }, type: 'CHI' });
         const total = txs.reduce((sum, tx) => sum + tx.amount, 0);
         return ctx.reply(`📊 ${timeLabel} bạn đã chi: **${new Intl.NumberFormat('vi-VN').format(total)} đ**`, { parse_mode: 'Markdown' });
-      } catch (e) {
-        return ctx.reply('❌ Lỗi thống kê.');
       }
+    } catch (e) {
+      console.error('Lỗi truy vấn text thống kê:', e);
+      return ctx.reply('❌ Lỗi thống kê.');
     }
   }
 
@@ -291,6 +292,7 @@ bot.on('text', async (ctx) => {
       ...Markup.inlineKeyboard([Markup.button.callback('❌ Hủy / Xóa', `del_${newTx._id}`)])
     });
   } catch (err) {
+    console.error('Lỗi lưu ghi nhanh:', err);
     return ctx.reply('❌ Có lỗi lưu database!');
   }
 });

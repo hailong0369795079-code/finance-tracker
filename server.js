@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const { Telegraf, Markup } = require('telegraf');
+const { GoogleGenAI } = require('@google/genai');
 
 const Transaction = require('./models/Transaction');
 const Reminder = require('./models/Reminder');
@@ -16,14 +17,19 @@ global.io = io;
 app.use(express.json());
 app.use(express.static('public'));
 
-// Kết nối MongoDB (Đã chuẩn hóa không còn lỗi warning)
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager')
-  .then(() => console.log('✅ Đã kết nối MongoDB thành công'))
+// Khởi tạo Gemini AI
+let ai = null;
+if (process.env.GEMINI_API_KEY) {
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+}
+
+// Kết nối MongoDB
+const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager';
+mongoose.connect(mongoURI)
+  .then(() => console.log('✅ Đã kết nối MongoDB Atlas thành công'))
   .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
 // ================= API ROUTES (WEB) =================
-
-// Lấy danh sách giao dịch
 app.get('/api/transactions', async (req, res) => {
   try {
     const transactions = await Transaction.find().sort({ createdAt: -1 });
@@ -33,7 +39,6 @@ app.get('/api/transactions', async (req, res) => {
   }
 });
 
-// Thêm giao dịch từ Web
 app.post('/api/transactions', async (req, res) => {
   try {
     const { amount, type, category, note } = req.body;
@@ -45,7 +50,6 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-// Xóa giao dịch từ Web
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     await Transaction.findByIdAndDelete(req.params.id);
@@ -56,7 +60,6 @@ app.delete('/api/transactions/:id', async (req, res) => {
   }
 });
 
-// Lấy danh sách lịch hẹn
 app.get('/api/reminders', async (req, res) => {
   try {
     const reminders = await Reminder.find().sort({ dueDate: 1 });
@@ -66,7 +69,6 @@ app.get('/api/reminders', async (req, res) => {
   }
 });
 
-// Thêm lịch hẹn từ Web
 app.post('/api/reminders', async (req, res) => {
   try {
     const { title, amount, dueDate } = req.body;
@@ -78,7 +80,6 @@ app.post('/api/reminders', async (req, res) => {
   }
 });
 
-// Xóa lịch hẹn từ Web
 app.delete('/api/reminders/:id', async (req, res) => {
   try {
     await Reminder.findByIdAndDelete(req.params.id);
@@ -89,7 +90,6 @@ app.delete('/api/reminders/:id', async (req, res) => {
   }
 });
 
-// Xác nhận thanh toán lịch hẹn
 app.post('/api/reminders/:id/pay', async (req, res) => {
   try {
     const reminder = await Reminder.findById(req.params.id);
@@ -118,15 +118,16 @@ app.post('/api/reminders/:id/pay', async (req, res) => {
   }
 });
 
-// ================= TELEGRAM BOT =================
+// ================= TELEGRAM BOT & GEMINI AI =================
 const BOT_TOKEN = process.env.BOT_TOKEN;
-if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+if (BOT_TOKEN) {
   const bot = new Telegraf(BOT_TOKEN);
 
   bot.start((ctx) => {
-    ctx.reply('🤖 Chào bạn đến với Bot Quản Lý Chi Tiêu!\n\n📌 **Hướng dẫn:**\n- Nhập nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn đóng điện 500k ngày 10/8`\n- Xóa gần nhất: `/xoa`');
+    ctx.reply('🤖 Chào bạn đến với Bot Quản Lý Chi Tiêu & AI!\n\n📌 **Hướng dẫn nhanh:**\n- Ghi chú: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Hẹn lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng chữ `ai` (VD: `ai tôi nên tiết kiệm thế nào?`)\n- Xóa gần nhất: `/xoa`');
   });
 
+  // Hẹn lịch thanh toán
   bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
     try {
       const title = ctx.match[1];
@@ -150,9 +151,10 @@ if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
     }
   });
 
+  // Ghi nhận giao dịch nhanh
   bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
     const text = ctx.message.text;
-    if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
+    if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
 
     try {
       const category = ctx.match[1].trim();
@@ -186,6 +188,31 @@ if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
     }
   });
 
+  // Tích hợp Gemini AI
+  bot.on('text', async (ctx) => {
+    const text = ctx.message.text;
+    if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
+
+    if (ai && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().includes('tư vấn') || text.toLowerCase().includes('chi tiêu'))) {
+      try {
+        await ctx.sendChatAction('typing');
+        const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(20);
+        const summary = transactions.map(t => `- ${t.category}: ${t.amount}đ (${t.type})`).join('\n');
+
+        const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nNgười dùng hỏi: "${text}". Hãy tư vấn ngắn gọn, hữu ích bằng tiếng Việt.`;
+        
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt
+        });
+
+        return ctx.reply(response.text || 'Xin lỗi, tôi chưa thể phân tích lúc này.');
+      } catch (err) {
+        console.error('Lỗi Gemini AI:', err);
+      }
+    }
+  });
+
   bot.action(/^delete_tx_(.+)$/, async (ctx) => {
     try {
       const txId = ctx.match[1];
@@ -194,7 +221,7 @@ if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
         io.emit('delete_transaction', txId);
         await ctx.editMessageText(`🗑️ **Đã xóa giao dịch thành công!**\n(${deletedTx.category} - ${deletedTx.amount.toLocaleString('vi-VN')} VNĐ)`, { parse_mode: 'Markdown' });
       } else {
-        await ctx.answerCbQuery('Giao dịch không tồn tại hoặc đã bị xóa.');
+        await ctx.answerCbQuery('Giao dịch không tồn tại.');
       }
     } catch (err) {
       console.error(err);
@@ -216,7 +243,7 @@ if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
     }
   });
 
-  bot.launch().then(() => console.log('🤖 Telegram Bot đang chạy'));
+  bot.launch().then(() => console.log('🤖 Telegram Bot & Gemini AI đang chạy'));
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }

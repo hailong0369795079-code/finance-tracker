@@ -11,9 +11,9 @@
       --text-main: #d1d4dc;
       --text-muted: #787b86;
       --border: #2a2e39;
-      --c-chi: #ef5350; /* Đỏ */
-      --c-thu: #26a69a; /* Xanh ngọc */
-      --c-dautu: #2962ff; /* Xanh dương */
+      --c-chi: #ef5350;
+      --c-thu: #26a69a;
+      --c-dautu: #2962ff;
     }
     
     * { box-sizing: border-box; }
@@ -27,14 +27,13 @@
 
     h2, h3 { margin-top: 0; color: #fff; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
-    /* Form thêm giao dịch */
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; margin-bottom: 5px; color: var(--text-muted); font-size: 0.9rem; }
     .form-control { width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 6px; }
     .btn { background: var(--c-thu); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
     .btn:hover { opacity: 0.9; }
 
-    /* Lịch & Nhắc hẹn */
+    /* Lịch */
     .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
     .calendar-header button { background: var(--border); color: #fff; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
     .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center; font-size: 0.85rem; }
@@ -43,10 +42,13 @@
     .calendar-date.today { border-color: var(--c-dautu); font-weight: bold; color: #fff; }
     .has-reminder::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; background: var(--c-chi); border-radius: 50%; }
 
-    /* Danh sách nhắc hẹn */
-    .reminder-list { margin-top: 15px; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    /* Nhắc hẹn */
+    .reminder-list { margin-top: 15px; max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
     .reminder-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-main); padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--c-chi); font-size: 0.9rem; }
     .btn-pay { background: var(--c-thu); color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    .reminder-form { display: flex; gap: 8px; margin-top: 15px; }
+    .reminder-form input { flex: 1; padding: 6px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 4px; font-size: 0.85rem; }
+    .reminder-form button { background: var(--c-dautu); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
 
     /* Bảng giao dịch */
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -59,7 +61,7 @@
   <div class="container">
     <header style="display: flex; justify-content: space-between; align-items: center;">
       <h1>📊 Quản Lý Chi Tiêu & Nhắc Hẹn</h1>
-      <div>Tổng chi tiêu: <span id="total-spent" style="color: var(--c-chi); font-size: 1.2rem; font-weight: bold;">0 VNĐ</span></div>
+      <div>Tổng chi: <span id="total-spent" style="color: var(--c-chi); font-size: 1.2rem; font-weight: bold;">0 VNĐ</span></div>
     </header>
 
     <div class="top-section">
@@ -93,7 +95,7 @@
       <div class="card">
         <div class="calendar-header">
           <button onclick="changeMonth(-1)">◀</button>
-          <h3 id="calendar-month-year" style="margin: 0; border: none;">Tháng 8 / 2026</h3>
+          <h3 id="calendar-month-year" style="margin: 0; border: none;">Tháng ...</h3>
           <button onclick="changeMonth(1)">▶</button>
         </div>
         
@@ -107,13 +109,20 @@
           <div class="calendar-day-name">CN</div>
         </div>
 
-        <h3 style="margin-top: 20px;">🔔 Danh Sách Nhắc Hẹn Đến Hạn</h3>
+        <h3 style="margin-top: 15px; font-size: 1rem;">🔔 Danh Sách Nhắc Hẹn</h3>
         <div class="reminder-list" id="reminder-list"></div>
+        
+        <form id="reminderForm" class="reminder-form">
+          <input type="text" id="r_title" placeholder="Tên khoản..." required>
+          <input type="number" id="r_amount" placeholder="Số tiền" required>
+          <input type="date" id="r_date" required>
+          <button type="submit">+ Thêm</button>
+        </form>
       </div>
     </div>
 
     <div class="card">
-      <h3>📜 Nhật Ký Giao Dịch Thực Tế</h3>
+      <h3>📜 Nhật Ký Giao Dịch</h3>
       <table>
         <thead>
           <tr>

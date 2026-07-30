@@ -16,11 +16,10 @@ global.io = io;
 app.use(express.json());
 app.use(express.static('public'));
 
-// Kết nối MongoDB
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => console.log('✅ Đã kết nối MongoDB')).catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
+// Kết nối MongoDB (Đã chuẩn hóa không còn lỗi warning)
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager')
+  .then(() => console.log('✅ Đã kết nối MongoDB thành công'))
+  .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
 // ================= API ROUTES (WEB) =================
 
@@ -67,7 +66,30 @@ app.get('/api/reminders', async (req, res) => {
   }
 });
 
-// Xác nhận thanh toán lịch hẹn (Tạo giao dịch thực tế & trừ tiền chi tiêu)
+// Thêm lịch hẹn từ Web
+app.post('/api/reminders', async (req, res) => {
+  try {
+    const { title, amount, dueDate } = req.body;
+    const reminder = await Reminder.create({ title, amount, dueDate });
+    io.emit('reminder_updated');
+    res.status(201).json(reminder);
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
+// Xóa lịch hẹn từ Web
+app.delete('/api/reminders/:id', async (req, res) => {
+  try {
+    await Reminder.findByIdAndDelete(req.params.id);
+    io.emit('reminder_updated');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
+// Xác nhận thanh toán lịch hẹn
 app.post('/api/reminders/:id/pay', async (req, res) => {
   try {
     const reminder = await Reminder.findById(req.params.id);
@@ -98,14 +120,13 @@ app.post('/api/reminders/:id/pay', async (req, res) => {
 
 // ================= TELEGRAM BOT =================
 const BOT_TOKEN = process.env.BOT_TOKEN;
-if (BOT_TOKEN) {
+if (BOT_TOKEN && BOT_TOKEN !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
   const bot = new Telegraf(BOT_TOKEN);
 
   bot.start((ctx) => {
-    ctx.reply('🤖 Chào bạn đến với Bot Quản Lý Chi Tiêu!\n\n📌 **Hướng dẫn sử dụng:**\n- Nhập nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr` (Bot sẽ ghi nhận và gửi kèm nút bấm Xóa).\n- Đặt lịch: `hẹn đóng điện 500k ngày 10/8` (Đúng hạn mới nhắc và trừ tiền).\n- Lệnh xóa nhanh: `/xoa` (Xóa giao dịch gần nhất bạn vừa nhập).');
+    ctx.reply('🤖 Chào bạn đến với Bot Quản Lý Chi Tiêu!\n\n📌 **Hướng dẫn:**\n- Nhập nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn đóng điện 500k ngày 10/8`\n- Xóa gần nhất: `/xoa`');
   });
 
-  // 1. Đặt lịch hẹn qua Telegram
   bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
     try {
       const title = ctx.match[1];
@@ -120,22 +141,15 @@ if (BOT_TOKEN) {
       const currentYear = new Date().getFullYear();
       const dueDate = new Date(currentYear, parseInt(month) - 1, parseInt(day));
 
-      await Reminder.create({
-        telegramUserId: userId,
-        title,
-        amount: rawAmount,
-        dueDate
-      });
-
+      await Reminder.create({ telegramUserId: userId, title, amount: rawAmount, dueDate });
       io.emit('reminder_updated');
-      ctx.reply(`📅 **Đã đặt lịch nhắc thành công!**\n- Nội dung: ${title}\n- Số tiền: ${rawAmount.toLocaleString('vi-VN')} VNĐ\n- Hạn: Ngày ${dateStr}\n\n*(Đến đúng ngày hệ thống sẽ nhắc và chỉ trừ tiền khi bạn xác nhận).*`);
+      ctx.reply(`📅 **Đã đặt lịch thành công!**\n- ${title}: ${rawAmount.toLocaleString('vi-VN')} VNĐ (Ngày ${dateStr})`);
     } catch (err) {
       console.error(err);
       ctx.reply('❌ Lỗi khi đặt lịch hẹn.');
     }
   });
 
-  // 2. Ghi nhận giao dịch nhanh qua Telegram kèm nút [❌ Xóa giao dịch này]
   bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
@@ -157,7 +171,6 @@ if (BOT_TOKEN) {
 
       io.emit('new_transaction', tx);
 
-      // Phản hồi kèm nút inline [❌ Xóa giao dịch này]
       await ctx.reply(
         `✅ Đã ghi nhận:\n📂 **${category}**: **${amount.toLocaleString('vi-VN')} VNĐ**`,
         {
@@ -173,42 +186,37 @@ if (BOT_TOKEN) {
     }
   });
 
-  // 3. Xử lý khi bấm nút Xóa giao dịch ngay trên Telegram
   bot.action(/^delete_tx_(.+)$/, async (ctx) => {
     try {
       const txId = ctx.match[1];
       const deletedTx = await Transaction.findByIdAndDelete(txId);
-
       if (deletedTx) {
         io.emit('delete_transaction', txId);
         await ctx.editMessageText(`🗑️ **Đã xóa giao dịch thành công!**\n(${deletedTx.category} - ${deletedTx.amount.toLocaleString('vi-VN')} VNĐ)`, { parse_mode: 'Markdown' });
       } else {
-        await ctx.answerCbQuery('Giao dịch không tồn tại hoặc đã bị xóa trước đó.');
+        await ctx.answerCbQuery('Giao dịch không tồn tại hoặc đã bị xóa.');
       }
     } catch (err) {
       console.error(err);
-      await ctx.answerCbQuery('Lỗi khi xóa giao dịch.');
+      await ctx.answerCbQuery('Lỗi khi xóa.');
     }
   });
 
-  // 4. Lệnh /xoa để xóa giao dịch gần nhất
   bot.command('xoa', async (ctx) => {
     try {
       const lastTx = await Transaction.findOne({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
-      if (!lastTx) {
-        return ctx.reply('📭 Không tìm thấy giao dịch nào gần đây để xóa.');
-      }
+      if (!lastTx) return ctx.reply('📭 Không tìm thấy giao dịch nào gần đây.');
 
       await Transaction.findByIdAndDelete(lastTx._id);
       io.emit('delete_transaction', lastTx._id);
-      ctx.reply(`🗑️ Đã xóa giao dịch gần nhất:\n- ${lastTx.category}: ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
+      ctx.reply(`🗑️ Đã xóa giao dịch: ${lastTx.category} - ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
     } catch (err) {
       console.error(err);
-      ctx.reply('❌ Lỗi khi xóa giao dịch.');
+      ctx.reply('❌ Lỗi khi xóa.');
     }
   });
 
-  bot.launch().then(() => console.log('🤖 Telegram Bot đã khởi động thành công'));
+  bot.launch().then(() => console.log('🤖 Telegram Bot đang chạy'));
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }

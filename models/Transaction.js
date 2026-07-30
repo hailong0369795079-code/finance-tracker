@@ -6,7 +6,7 @@ const transactionSchema = new mongoose.Schema({
   type: { type: String, enum: ['CHI', 'THU', 'DAUTU'], required: true },
   category: { type: String, required: true },
   note: { type: String, default: '' },
-  source: { type: String, default: 'WEB' } // WEB, BOT, REMINDER
+  source: { type: String, default: 'WEB' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema);

@@ -5,7 +5,6 @@ let currentDate = new Date();
 
 document.addEventListener('DOMContentLoaded', () => {
   fetchData();
-  renderCalendar();
 });
 
 async function fetchData() {
@@ -54,7 +53,7 @@ function renderReminders(reminders) {
   const pendingReminders = reminders.filter(r => !r.isPaid);
 
   if (pendingReminders.length === 0) {
-    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 10px;">Không có khoản hẹn nào sắp tới 🎉</div>';
+    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 5px;">Không có lịch hẹn sắp tới 🎉</div>';
     return;
   }
 
@@ -67,20 +66,26 @@ function renderReminders(reminders) {
         <strong>${rem.title}</strong><br>
         <small style="color: var(--text-muted);">Hạn: ${dueDateStr} - <b>${rem.amount.toLocaleString('vi-VN')} VNĐ</b></small>
       </div>
-      <button class="btn-pay" onclick="payReminder('${rem._id}')">✅ Xác nhận chi</button>
+      <div>
+        <button class="btn-pay" onclick="payReminder('${rem._id}')">✅ Chi</button>
+        <button onclick="deleteReminder('${rem._id}')" style="background:none; border:none; color:var(--c-chi); cursor:pointer; margin-left:5px;">✕</button>
+      </div>
     `;
     list.appendChild(item);
   });
 }
 
 async function payReminder(id) {
-  if (confirm('Xác nhận bạn đã thanh toán khoản này? Tiền sẽ được ghi nhận vào giao dịch thực tế và trừ vào chi tiêu.')) {
+  if (confirm('Xác nhận thanh toán khoản này? Tiền sẽ được trừ vào chi tiêu thực tế.')) {
     const res = await fetch(`/api/reminders/${id}/pay`, { method: 'POST' });
-    if (res.ok) {
-      fetchData();
-    } else {
-      alert('Có lỗi xảy ra khi xác nhận thanh toán!');
-    }
+    if (res.ok) fetchData();
+  }
+}
+
+async function deleteReminder(id) {
+  if (confirm('Xóa lịch hẹn này?')) {
+    await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+    fetchData();
   }
 }
 
@@ -107,8 +112,7 @@ function renderCalendar() {
   const today = new Date();
 
   for (let i = 0; i < firstDayIndex; i++) {
-    const emptyCell = document.createElement('div');
-    grid.appendChild(emptyCell);
+    grid.appendChild(document.createElement('div'));
   }
 
   for (let day = 1; day <= totalDays; day++) {
@@ -150,8 +154,26 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
   document.getElementById('addForm').reset();
 });
 
+document.getElementById('reminderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    title: document.getElementById('r_title').value,
+    amount: parseFloat(document.getElementById('r_amount').value),
+    dueDate: document.getElementById('r_date').value
+  };
+
+  await fetch('/api/reminders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  document.getElementById('reminderForm').reset();
+  fetchData();
+});
+
 async function deleteTx(id) {
-  if(confirm('Xóa giao dịch này?')) {
+  if (confirm('Xóa giao dịch này?')) {
     await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
   }
 }

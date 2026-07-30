@@ -37,6 +37,38 @@ mongoose.connect(mongoURI)
   .then(() => console.log('✅ Đã kết nối MongoDB thành công'))
   .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
+// ==================== HÀM NGÂN SÁCH ====================
+
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function getBudgetSpent(userId, category, month) {
+  try {
+    const [year, monthNum] = month.split('-');
+    const startDate = new Date(`${year}-${monthNum}-01`);
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + 1);
+
+    const result = await Transaction.aggregate([
+      {
+        $match: {
+          telegramUserId: userId,
+          category: category.toLowerCase(),
+          createdAt: { $gte: startDate, $lt: endDate }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+
+    return result.length > 0 ? result[0].total : 0;
+  } catch (err) {
+    console.error('Lỗi lấy chi tiêu:', err);
+    return 0;
+  }
+}
+
 // ==================== HỈM XUẤT EXCEL & THỐNG KÊ ====================
 
 async function generateExcelReport(userId = null) {
@@ -130,7 +162,13 @@ async function generateExcelReport(userId = null) {
 
     const timestamp = new Date().toISOString().slice(0, 10);
     const filename = `Bao_Cao_Tai_Chinh_${timestamp}.xlsx`;
-    const filepath = path.join('/tmp', filename);
+    const filepath = path.join(__dirname, 'exports', filename);
+    
+    // Tạo thư mục exports nếu chưa có
+    const exportDir = path.join(__dirname, 'exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir, { recursive: true });
+    }
 
     await workbook.xlsx.writeFile(filepath);
     return filepath;
@@ -288,6 +326,54 @@ app.post('/api/reminders/:id/pay', async (req, res) => {
   }
 });
 
+// ================= BUDGET API =================
+
+app.get('/api/budgets', async (req, res) => {
+  try {
+    const currentMonth = getCurrentMonth();
+    const budgets = await Transaction.find({
+      budget_month: currentMonth,
+      budget_limit: { $ne: null }
+    }).distinct('category');
+
+    const result = [];
+    for (const category of budgets) {
+      const doc = await Transaction.findOne({
+        category,
+        budget_month: currentMonth,
+        budget_limit: { $ne: null }
+      });
+      result.push({
+        category,
+        limit: doc.budget_limit,
+        month: currentMonth
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
+app.post('/api/budgets', async (req, res) => {
+  try {
+    const { category, limit } = req.body;
+    const currentMonth = getCurrentMonth();
+
+    await Transaction.updateOne(
+      { category: category.toLowerCase(), budget_month: currentMonth },
+      { budget_limit: limit, budget_month: currentMonth },
+      { upsert: true }
+    );
+
+    io.emit('budget_updated');
+    res.status(201).json({ category, limit, month: currentMonth });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+});
+
 // ================= TELEGRAM BOT & GEMINI AI =================
 const BOT_TOKEN = process.env.BOT_TOKEN || "8902520402:AAFqK83aAdDO1xp6R0WHi6p27mrdtOd7EuM";
 if (BOT_TOKEN) {
@@ -299,7 +385,9 @@ if (BOT_TOKEN) {
       '📌 **HƯỚNG DẪN SỬ DỤNG:**\n' +
       '• Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n' +
       '• Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n' +
+      '• 💰 Đặt ngân sách: `/ngansach ăn sáng 500k`\n' +
       '• 📊 Xem thống kê: `/thongke`\n' +
+      '• 📊 Xem ngân sách: `/xemngansach`\n' +
       '• 📥 Xuất Excel: `/excel`\n' +
       '• 🤖 Hỏi AI: `ai tôi nên tiết kiệm thế nào?`\n' +
       '• ❌ Xóa gần nhất: `/xoa`\n\n' +
@@ -350,6 +438,90 @@ if (BOT_TOKEN) {
     } catch (err) {
       console.error('Lỗi thống kê:', err);
       ctx.reply('❌ Lỗi khi lấy thống kê.');
+    }
+  });
+
+  // Lệnh /ngansach - Đặt ngân sách
+  bot.command('ngansach', async (ctx) => {
+    try {
+      const args = ctx.message.text.split(' ').slice(1).join(' ');
+      const match = args.match(/^(.+?)\s+(\d+[k|tr]?)$/i);
+      
+      if (!match) {
+        return ctx.reply('❌ Sai định dạng!\n\nUse: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
+      }
+
+      const category = match[1].trim().toLowerCase();
+      let limit = parseFloat(match[2]);
+      if (match[2].toLowerCase().includes('k')) limit *= 1000;
+      if (match[2].toLowerCase().includes('tr')) limit *= 1000000;
+
+      const currentMonth = getCurrentMonth();
+      
+      await Transaction.updateOne(
+        { telegramUserId: ctx.from.id, category, budget_month: currentMonth },
+        { budget_limit: limit, budget_month: currentMonth },
+        { upsert: true }
+      );
+
+      ctx.reply(
+        `✅ **Đã đặt ngân sách!**\n` +
+        `📂 Danh mục: ${category}\n` +
+        `💰 Giới hạn: ${limit.toLocaleString('vi-VN')} VNĐ\n` +
+        `📅 Tháng: ${currentMonth}`,
+        { parse_mode: 'Markdown' }
+      );
+      io.emit('budget_updated');
+    } catch (err) {
+      console.error('Lỗi đặt ngân sách:', err);
+      ctx.reply('❌ Lỗi khi đặt ngân sách.');
+    }
+  });
+
+  // Lệnh /xemngansach - Xem ngân sách
+  bot.command('xemngansach', async (ctx) => {
+    try {
+      const currentMonth = getCurrentMonth();
+      
+      const budgets = await Transaction.find({
+        telegramUserId: ctx.from.id,
+        budget_month: currentMonth,
+        budget_limit: { $ne: null }
+      }).distinct('category');
+
+      if (budgets.length === 0) {
+        return ctx.reply('📭 Chưa có ngân sách nào.\n\nUse: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
+      }
+
+      let report = `💰 **NGÂN SÁCH THÁNG ${currentMonth}**\n\n`;
+
+      for (const category of budgets) {
+        const budgetDoc = await Transaction.findOne({
+          telegramUserId: ctx.from.id,
+          category,
+          budget_month: currentMonth,
+          budget_limit: { $ne: null }
+        });
+
+        const spent = await getBudgetSpent(ctx.from.id, category, currentMonth);
+        const limit = budgetDoc.budget_limit;
+        const remaining = limit - spent;
+        const percentage = ((spent / limit) * 100).toFixed(1);
+
+        let status = '✅';
+        if (percentage >= 100) status = '🔴';
+        else if (percentage >= 80) status = '🟡';
+
+        report += `${status} **${category}**\n`;
+        report += `├ Giới hạn: ${limit.toLocaleString('vi-VN')} VNĐ\n`;
+        report += `├ Đã chi: ${spent.toLocaleString('vi-VN')} VNĐ (${percentage}%)\n`;
+        report += `└ Còn lại: ${Math.max(0, remaining).toLocaleString('vi-VN')} VNĐ\n\n`;
+      }
+
+      ctx.reply(report, { parse_mode: 'Markdown' });
+    } catch (err) {
+      console.error('Lỗi xem ngân sách:', err);
+      ctx.reply('❌ Lỗi khi lấy ngân sách.');
     }
   });
 

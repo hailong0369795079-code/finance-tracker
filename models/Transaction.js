@@ -6,7 +6,9 @@ const transactionSchema = new mongoose.Schema({
   type: { type: String, enum: ['CHI', 'THU', 'DAUTU'], required: true },
   category: { type: String, required: true },
   note: { type: String, default: '' },
-  source: { type: String, default: 'WEB' }
+  source: { type: String, default: 'WEB' },
+  budget_limit: { type: Number, default: null }, // Ngân sách cho danh mục này
+  budget_month: { type: String, default: null }  // Tháng ngân sách (format: "2024-01")
 }, { timestamps: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema);

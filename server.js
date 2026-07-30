@@ -17,16 +17,20 @@ global.io = io;
 app.use(express.json());
 app.use(express.static('public'));
 
-// Khởi tạo Gemini AI
+// Khởi tạo Gemini AI bằng API Key bạn vừa cung cấp
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "AQ.Ab8RN6J6NMdLfDr0gZUDqbnAl-IcRlaGqgeIDn5sNGdz3yoH8Q";
 let ai = null;
-if (process.env.GEMINI_API_KEY) {
-  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+try {
+  ai = new GoogleGenAI({ apiKey: GEMINI_KEY });
+  console.log('✨ Gemini AI đã được khởi tạo thành công với API Key cấu hình sẵn!');
+} catch (err) {
+  console.error('❌ Lỗi khởi tạo Gemini AI:', err);
 }
 
 // Kết nối MongoDB
 const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager';
 mongoose.connect(mongoURI)
-  .then(() => console.log('✅ Đã kết nối MongoDB Atlas thành công'))
+  .then(() => console.log('✅ Đã kết nối MongoDB thành công'))
   .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
 // ================= API ROUTES (WEB) =================
@@ -124,7 +128,7 @@ if (BOT_TOKEN) {
   const bot = new Telegraf(BOT_TOKEN);
 
   bot.start((ctx) => {
-    ctx.reply('🤖 Chào bạn đến với Bot Quản Lý Chi Tiêu & AI!\n\n📌 **Hướng dẫn nhanh:**\n- Ghi chú: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Hẹn lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng chữ `ai` (VD: `ai tôi nên tiết kiệm thế nào?`)\n- Xóa gần nhất: `/xoa`');
+    ctx.reply('🤖 Chào bạn! Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n📌 **Hướng dẫn:**\n- Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng `ai` (VD: `ai tôi nên phân bổ chi tiêu thế nào?`)\n- Xóa gần nhất: `/xoa`');
   });
 
   // Hẹn lịch thanh toán
@@ -188,27 +192,31 @@ if (BOT_TOKEN) {
     }
   });
 
-  // Tích hợp Gemini AI
+  // Xử lý trò chuyện/tư vấn tài chính với Gemini AI
   bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
 
-    if (ai && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().includes('tư vấn') || text.toLowerCase().includes('chi tiêu'))) {
+    if (ai && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().startsWith('gemini '))) {
       try {
         await ctx.sendChatAction('typing');
-        const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(20);
-        const summary = transactions.map(t => `- ${t.category}: ${t.amount}đ (${t.type})`).join('\n');
+        const queryText = text.replace(/^(ai|gemini)\s+/i, '');
+        
+        // Lấy 15 giao dịch gần đây để AI phân tích ngữ cảnh
+        const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(15);
+        const summary = transactions.map(t => `- ${t.category}: ${t.amount.toLocaleString('vi-VN')}đ (${t.type})`).join('\n');
 
-        const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nNgười dùng hỏi: "${text}". Hãy tư vấn ngắn gọn, hữu ích bằng tiếng Việt.`;
+        const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi/Yêu cầu của tôi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
         
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt
         });
 
-        return ctx.reply(response.text || 'Xin lỗi, tôi chưa thể phân tích lúc này.');
+        return ctx.reply(response.text || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời lúc này.');
       } catch (err) {
         console.error('Lỗi Gemini AI:', err);
+        return ctx.reply('❌ Đã xảy ra lỗi khi kết nối với Gemini AI.');
       }
     }
   });
@@ -243,7 +251,7 @@ if (BOT_TOKEN) {
     }
   });
 
-  bot.launch().then(() => console.log('🤖 Telegram Bot & Gemini AI đang chạy'));
+  bot.launch().then(() => console.log('🤖 Telegram Bot & Gemini AI đang chạy mượt mà'));
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }

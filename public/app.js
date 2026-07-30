@@ -1,292 +1,161 @@
+const socket = io();
+let allTransactions = [];
+let allReminders = [];
+let currentDate = new Date();
+
 document.addEventListener('DOMContentLoaded', () => {
-  initApp();
+  fetchData();
+  renderCalendar();
 });
 
-let socket;
-let allData = [];
-let reminders = [];
-let doughnutChart = null;
-let currentCalDate = new Date();
-
-async function initApp() {
-  // 1. Khởi tạo kết nối Socket.io real-time
-  socket = io();
-
-  // 2. Lắng nghe sự kiện real-time từ server
-  socket.on('new_transaction', (tx) => {
-    allData.unshift(tx);
-    updateUI();
-  });
-
-  socket.on('delete_transaction', (id) => {
-    allData = allData.filter(t => t._id !== id);
-    updateUI();
-  });
-
-  socket.on('new_reminder', (r) => {
-    reminders.push(r);
-    updateUI();
-  });
-
-  socket.on('delete_reminder', (id) => {
-    reminders = reminders.filter(r => r._id !== id);
-    updateUI();
-  });
-
-  // 3. Gắn sự kiện submit form thêm giao dịch
-  const addForm = document.getElementById('addForm');
-  if (addForm) {
-    addForm.addEventListener('submit', handleAddTransaction);
-  }
-
-  // 4. Gắn sự kiện chuyển tháng trên lịch
-  const prevBtn = document.getElementById('prevMonth');
-  const nextBtn = document.getElementById('nextMonth');
-  if (prevBtn) prevBtn.addEventListener('click', () => { currentCalDate.setMonth(currentCalDate.getMonth() - 1); renderCalendar(); });
-  if (nextBtn) nextBtn.addEventListener('click', () => { currentCalDate.setMonth(currentCalDate.getMonth() + 1); renderCalendar(); });
-
-  // 5. Tải toàn bộ dữ liệu ban đầu từ Server
-  await loadAllData();
-}
-
-async function loadAllData() {
+async function fetchData() {
   try {
-    const [resTx, resRem] = await Promise.all([
-      fetch('/api/transactions'),
-      fetch('/api/reminders')
-    ]);
-    
-    if (resTx.ok) allData = await resTx.json();
-    if (resRem.ok) reminders = await resRem.json();
+    const resTx = await fetch('/api/transactions');
+    allTransactions = await resTx.json();
+    renderTransactions(allTransactions);
+
+    const resRem = await fetch('/api/reminders');
+    allReminders = await resRem.json();
+    renderReminders(allReminders);
+    renderCalendar();
   } catch (err) {
-    console.error("Lỗi khi tải dữ liệu từ server:", err);
+    console.error("Lỗi tải dữ liệu:", err);
   }
-  updateUI();
 }
 
-function updateUI() {
-  renderTable();
-  renderCharts();
-  renderCalendar();
-  renderReminders();
+function renderTransactions(transactions) {
+  const list = document.getElementById('transaction-list');
+  list.innerHTML = '';
+
+  let totalChi = 0;
+  transactions.forEach(tx => {
+    if (tx.type === 'CHI') totalChi += tx.amount;
+    
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${new Date(tx.createdAt).toLocaleString('vi-VN')}</td>
+      <td><strong>${tx.category}</strong> <span style="font-size:0.75rem; background:var(--border); padding:2px 6px; border-radius:4px;">${tx.source || 'WEB'}</span></td>
+      <td>${tx.note || ''}</td>
+      <td style="color: ${tx.type === 'CHI' ? 'var(--c-chi)' : 'var(--c-thu)'}; font-weight: bold;">
+        ${tx.type === 'CHI' ? '-' : '+'}${tx.amount.toLocaleString('vi-VN')} VNĐ
+      </td>
+      <td><button onclick="deleteTx('${tx._id}')" style="background:none; border:none; color:var(--c-chi); cursor:pointer;">Xóa</button></td>
+    `;
+    list.appendChild(row);
+  });
+
+  document.getElementById('total-spent').innerText = `${totalChi.toLocaleString('vi-VN')} VNĐ`;
 }
 
-// --- XỬ LÝ GIAO DỊCH ---
-function renderTable() {
-  const tbody = document.getElementById('table-body');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-  
-  if (allData.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted);">Chưa có giao dịch nào.</td></tr>`;
+function renderReminders(reminders) {
+  const list = document.getElementById('reminder-list');
+  list.innerHTML = '';
+
+  const pendingReminders = reminders.filter(r => !r.isPaid);
+
+  if (pendingReminders.length === 0) {
+    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 10px;">Không có khoản hẹn nào sắp tới 🎉</div>';
     return;
   }
 
-  allData.forEach(tx => {
-    const isChi = tx.type === 'CHI' || !tx.type;
-    const typeClass = isChi ? 'chi' : (tx.type === 'THU' ? 'thu' : 'dautu');
-    const formattedAmount = new Intl.NumberFormat('vi-VN').format(tx.amount) + ' đ';
-    
-    let timeStr = '';
-    if (tx.createdAt) {
-      const d = new Date(tx.createdAt);
-      timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-    }
-
-    tbody.innerHTML += `
-      <tr>
-        <td><span class="badge ${typeClass}">${tx.type || 'CHI'}</span></td>
-        <td>${escapeHtml(tx.note || '')}</td>
-        <td>${escapeHtml(tx.category || 'Khác')}</td>
-        <td style="font-size:11px; color:#787b86;">${escapeHtml(tx.source || 'BOT')}</td>
-        <td class="${isChi ? 'text-chi' : 'text-thu'}">${isChi ? '-' : '+'}${formattedAmount}</td>
-        <td>${timeStr}</td>
-        <td><button class="action-btn delete" onclick="deleteTx('${tx._id}')" title="Xóa">🗑️</button></td>
-      </tr>
+  pendingReminders.forEach(rem => {
+    const dueDateStr = new Date(rem.dueDate).toLocaleDateString('vi-VN');
+    const item = document.createElement('div');
+    item.className = 'reminder-item';
+    item.innerHTML = `
+      <div>
+        <strong>${rem.title}</strong><br>
+        <small style="color: var(--text-muted);">Hạn: ${dueDateStr} - <b>${rem.amount.toLocaleString('vi-VN')} VNĐ</b></small>
+      </div>
+      <button class="btn-pay" onclick="payReminder('${rem._id}')">✅ Xác nhận chi</button>
     `;
+    list.appendChild(item);
   });
 }
 
-async function handleAddTransaction(e) {
-  e.preventDefault();
-  const amountInput = document.getElementById('f_amount');
-  const typeInput = document.getElementById('f_type');
-  const categoryInput = document.getElementById('f_category');
-  const noteInput = document.getElementById('f_note');
-
-  if (!amountInput || !categoryInput || !noteInput) return;
-
-  const payload = {
-    amount: parseFloat(amountInput.value),
-    type: typeInput ? typeInput.value : 'CHI',
-    category: categoryInput.value.trim(),
-    note: noteInput.value.trim()
-  };
-
-  try {
-    const res = await fetch('/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+async function payReminder(id) {
+  if (confirm('Xác nhận bạn đã thanh toán khoản này? Tiền sẽ được ghi nhận vào giao dịch thực tế và trừ vào chi tiêu.')) {
+    const res = await fetch(`/api/reminders/${id}/pay`, { method: 'POST' });
     if (res.ok) {
-      document.getElementById('addForm').reset();
+      fetchData();
     } else {
-      alert('Không thể lưu giao dịch.');
+      alert('Có lỗi xảy ra khi xác nhận thanh toán!');
     }
-  } catch (err) {
-    console.error('Lỗi khi thêm giao dịch:', err);
   }
 }
+
+function changeMonth(direction) {
+  currentDate.setMonth(currentDate.getMonth() + direction);
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const grid = document.getElementById('calendar-grid');
+  const monthYearLabel = document.getElementById('calendar-month-year');
+  
+  while (grid.children.length > 7) {
+    grid.removeChild(grid.lastChild);
+  }
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  monthYearLabel.innerText = `Tháng ${month + 1} / ${year}`;
+
+  const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7;
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  const today = new Date();
+
+  for (let i = 0; i < firstDayIndex; i++) {
+    const emptyCell = document.createElement('div');
+    grid.appendChild(emptyCell);
+  }
+
+  for (let day = 1; day <= totalDays; day++) {
+    const cell = document.createElement('div');
+    cell.className = 'calendar-date';
+    cell.innerText = day;
+
+    if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
+      cell.classList.add('today');
+    }
+
+    const hasRem = allReminders.some(r => {
+      const rDate = new Date(r.dueDate);
+      return !r.isPaid && rDate.getFullYear() === year && rDate.getMonth() === month && rDate.getDate() === day;
+    });
+
+    if (hasRem) {
+      cell.classList.add('has-reminder');
+    }
+
+    grid.appendChild(cell);
+  }
+}
+
+document.getElementById('addForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    amount: parseFloat(document.getElementById('f_amount').value),
+    type: document.getElementById('f_type').value,
+    category: document.getElementById('f_category').value,
+    note: document.getElementById('f_note').value
+  };
+  
+  await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  document.getElementById('addForm').reset();
+});
 
 async function deleteTx(id) {
-  if (confirm('Bạn có chắc chắn muốn xóa giao dịch này?')) {
-    try {
-      await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-    } catch (err) {
-      console.error('Lỗi khi xóa giao dịch:', err);
-    }
+  if(confirm('Xóa giao dịch này?')) {
+    await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
   }
 }
 
-// --- XỬ LÝ BIỂU ĐỒ ---
-function renderCharts() {
-  let categories = {};
-  allData.forEach(tx => {
-    if (tx.type === 'CHI' || !tx.type) {
-      categories[tx.category] = (categories[tx.category] || 0) + tx.amount;
-    }
-  });
-
-  const canvasEl = document.getElementById('doughnutChart');
-  if (!canvasEl) return;
-  const dCtx = canvasEl.getContext('2d');
-  
-  if (doughnutChart) doughnutChart.destroy();
-
-  const labels = Object.keys(categories);
-  const dataVals = Object.values(categories);
-
-  doughnutChart = new Chart(dCtx, {
-    type: 'doughnut',
-    data: {
-      labels: labels.length ? labels : ['Chưa có dữ liệu'],
-      datasets: [{
-        data: dataVals.length ? dataVals : [1],
-        backgroundColor: ['#ef5350', '#ab47bc', '#42a5f5', '#ffca28', '#26a69a', '#ec407a', '#7e57c2'],
-        borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#d1d4dc', font: { size: 11 } } }
-      },
-      cutout: '70%'
-    }
-  });
-}
-
-// --- XỬ LÝ LỊCH & NHẮC HẸN ---
-function renderCalendar() {
-  const titleEl = document.getElementById('calendarTitle');
-  const daysContainer = document.getElementById('calendarDays');
-  if (!titleEl || !daysContainer) return;
-
-  const year = currentCalDate.getFullYear();
-  const month = currentCalDate.getMonth();
-  titleEl.innerText = `Tháng ${month + 1} / ${year}`;
-
-  const firstDay = new Date(year, month, 1).getDay();
-  const lastDate = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
-  
-  daysContainer.innerHTML = '';
-
-  for (let i = 0; i < firstDay; i++) {
-    daysContainer.innerHTML += `<div class="day-cell empty"></div>`;
-  }
-
-  for (let date = 1; date <= lastDate; date++) {
-    const fullDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
-    const isToday = date === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-    const hasReminder = reminders.some(r => r.date === fullDateStr);
-    
-    let cls = 'day-cell';
-    if (isToday) cls += ' today';
-    if (hasReminder) cls += ' has-reminder';
-
-    daysContainer.innerHTML += `<div class="${cls}" title="${fullDateStr}">${date}</div>`;
-  }
-}
-
-function renderReminders() {
-  const listContainer = document.getElementById('reminderList');
-  if (!listContainer) return;
-  
-  listContainer.innerHTML = '';
-  if (reminders.length === 0) {
-    listContainer.innerHTML = `<div style="font-size:12px; color:var(--text-muted); text-align:center; padding: 10px;">Không có lịch hẹn thanh toán.</div>`;
-    return;
-  }
-
-  const sortedReminders = [...reminders].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  sortedReminders.forEach(item => {
-    const fmtDate = item.date ? item.date.split('-').reverse().join('/') : '';
-    const formattedAmount = new Intl.NumberFormat('vi-VN').format(item.amount) + ' đ';
-
-    listContainer.innerHTML += `
-      <div class="reminder-item">
-        <div class="reminder-info">
-          <span style="font-weight: 600; color: #fff;">${escapeHtml(item.title)}</span>
-          <span class="reminder-date">⏰ ${fmtDate} - <span style="color:var(--c-chi); font-weight:bold;">${formattedAmount}</span></span>
-        </div>
-        <button class="reminder-del" onclick="deleteReminder('${item._id}')" title="Xóa">🗑️</button>
-      </div>
-    `;
-  });
-}
-
-async function addReminderPrompt() {
-  const title = prompt("Tên khoản thanh toán (VD: Tiền nhà, Tiền điện):");
-  if (!title) return;
-  const amountInput = prompt("Số tiền (VNĐ):", "500000");
-  if (amountInput === null) return;
-  const amount = parseFloat(amountInput) || 0;
-  const date = prompt("Ngày hạn (Định dạng YYYY-MM-DD):", new Date().toISOString().split('T')[0]);
-  if (!date) return;
-
-  try {
-    const res = await fetch('/api/reminders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, amount, date })
-    });
-    if (!res.ok) {
-      alert('Không thể thêm lịch nhắc!');
-    }
-  } catch (err) {
-    console.error('Lỗi khi thêm nhắc hẹn:', err);
-  }
-}
-
-async function deleteReminder(id) {
-  if (confirm('Bạn có muốn xóa lịch hẹn này không?')) {
-    try {
-      await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
-    } catch (err) {
-      console.error('Lỗi khi xóa nhắc hẹn:', err);
-    }
-  }
-}
-
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+socket.on('new_transaction', (tx) => { allTransactions.unshift(tx); renderTransactions(allTransactions); });
+socket.on('delete_transaction', (id) => { allTransactions = allTransactions.filter(t => t._id !== id); renderTransactions(allTransactions); });
+socket.on('reminder_updated', () => { fetchData(); });

@@ -3,9 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Finance Dashboard Dark Theme</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/socket.io/socket.io.js"></script>
+  <title>Quản Lý Chi Tiêu & Nhắc Hẹn</title>
   <style>
     :root {
       --bg-main: #131722;
@@ -22,134 +20,116 @@
     body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg-main); color: var(--text-main); margin: 0; padding: 20px; }
     
     .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+    .card { background: var(--bg-card); border-radius: 8px; padding: 20px; border: 1px solid var(--border); }
     
-    h2 { margin-top: 0; font-size: 18px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; }
-    
-    /* Grid layout */
-    .row-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .row-data { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    .top-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media(max-width: 768px) { .top-section { grid-template-columns: 1fr; } }
 
-    /* Form thêm giao dịch nhanh */
-    .form-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-    .form-group input, .form-group select, .form-group button {
-      padding: 10px; background: var(--bg-main); border: 1px solid var(--border);
-      color: var(--text-main); border-radius: 6px; font-size: 14px; outline: none;
-    }
-    .form-group input, .form-group select { flex: 1; min-width: 140px; }
-    .form-group button { background: var(--c-thu); color: #fff; border: none; font-weight: bold; cursor: pointer; padding: 10px 20px; }
-    .form-group button:hover { opacity: 0.9; }
+    h2, h3 { margin-top: 0; color: #fff; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
-    /* Bảng dữ liệu */
-    .table-container { overflow-x: auto; max-height: 400px; }
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-    th, td { padding: 12px; border-bottom: 1px solid var(--border); }
-    th { color: var(--text-muted); font-weight: 600; background: rgba(255,255,255,0.02); }
-    
-    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-    .badge.chi { background: rgba(239, 83, 80, 0.2); color: var(--c-chi); }
-    .badge.thu { background: rgba(38, 166, 154, 0.2); color: var(--c-thu); }
-    .badge.dautu { background: rgba(41, 98, 255, 0.2); color: var(--c-dautu); }
+    /* Form thêm giao dịch */
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; margin-bottom: 5px; color: var(--text-muted); font-size: 0.9rem; }
+    .form-control { width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 6px; }
+    .btn { background: var(--c-thu); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
+    .btn:hover { opacity: 0.9; }
 
-    .text-chi { color: var(--c-chi); font-weight: bold; }
-    .text-thu { color: var(--c-thu); font-weight: bold; }
-    
-    .action-btn { background: none; border: none; cursor: pointer; font-size: 14px; padding: 4px; }
-    .action-btn.delete:hover { opacity: 0.7; }
-
-    /* LỊCH & NHẮC HẸN CSS */
+    /* Lịch & Nhắc hẹn */
     .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-    .calendar-header button { background: var(--border); border: none; color: #fff; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
-    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center; font-size: 13px; }
-    .calendar-grid div { padding: 8px 0; border-radius: 4px; }
-    .calendar-grid .day-name { font-weight: bold; color: var(--text-muted); }
-    .calendar-grid .day-cell { background: rgba(255,255,255,0.02); position: relative; min-height: 34px; display: flex; align-items: center; justify-content: center; }
-    .calendar-grid .day-cell.today { border: 1px solid var(--c-thu); color: var(--c-thu); font-weight: bold; }
-    .calendar-grid .day-cell.has-reminder::after { content: ''; position: absolute; bottom: 3px; width: 5px; height: 5px; background: var(--c-chi); border-radius: 50%; }
-    
-    .reminder-section { margin-top: 15px; border-top: 1px solid var(--border); padding-top: 10px; max-height: 150px; overflow-y: auto; }
-    .reminder-item { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.01); padding: 6px 10px; border-radius: 4px; margin-bottom: 6px; font-size: 13px; }
-    .reminder-info { display: flex; flex-direction: column; }
-    .reminder-date { font-size: 11px; color: var(--text-muted); }
-    .reminder-del { background: none; border: none; cursor: pointer; }
+    .calendar-header button { background: var(--border); color: #fff; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center; font-size: 0.85rem; }
+    .calendar-day-name { font-weight: bold; color: var(--text-muted); padding-bottom: 5px; }
+    .calendar-date { padding: 8px 0; background: var(--bg-main); border-radius: 4px; border: 1px solid var(--border); position: relative; min-height: 35px; }
+    .calendar-date.today { border-color: var(--c-dautu); font-weight: bold; color: #fff; }
+    .has-reminder::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; background: var(--c-chi); border-radius: 50%; }
 
-    .btn-add-reminder { background: var(--c-dautu); border: none; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    /* Danh sách nhắc hẹn */
+    .reminder-list { margin-top: 15px; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .reminder-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-main); padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--c-chi); font-size: 0.9rem; }
+    .btn-pay { background: var(--c-thu); color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
 
-    @media(max-width: 768px) {
-      .row-charts { grid-template-columns: 1fr; }
-    }
+    /* Bảng giao dịch */
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    th { color: var(--text-muted); }
   </style>
 </head>
 <body>
 
   <div class="container">
-    <div class="card">
-      <h2>💸 Thêm Giao Dịch Mới</h2>
-      <form id="addForm" class="form-group">
-        <input type="number" id="f_amount" placeholder="Số tiền (VNĐ)" required />
-        <select id="f_type">
-          <option value="CHI">🔴 Chi Tiêu</option>
-          <option value="THU">🟢 Thu Nhập</option>
-          <option value="DAUTU">🔵 Đầu Tư</option>
-        </select>
-        <input type="text" id="f_category" placeholder="Danh mục (VD: Ăn uống, Lương...)" required />
-        <input type="text" id="f_note" placeholder="Ghi chú thêm..." />
-        <button type="submit">Thêm Giao Dịch</button>
-      </form>
-    </div>
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+      <h1>📊 Quản Lý Chi Tiêu & Nhắc Hẹn</h1>
+      <div>Tổng chi tiêu: <span id="total-spent" style="color: var(--c-chi); font-size: 1.2rem; font-weight: bold;">0 VNĐ</span></div>
+    </header>
 
-    <div class="row-charts">
+    <div class="top-section">
       <div class="card">
-        <h2>📊 Cơ Cấu Chi Tiêu</h2>
-        <div style="position: relative; height: 260px;">
-          <canvas id="doughnutChart"></canvas>
-        </div>
+        <h3>➕ Thêm Giao Dịch Mới</h3>
+        <form id="addForm">
+          <div class="form-group">
+            <label>Số tiền (VNĐ)</label>
+            <input type="number" id="f_amount" class="form-control" required placeholder="VD: 500000">
+          </div>
+          <div class="form-group">
+            <label>Loại</label>
+            <select id="f_type" class="form-control">
+              <option value="CHI">Chi tiêu</option>
+              <option value="THU">Thu nhập</option>
+              <option value="DAUTU">Đầu tư</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Danh mục</label>
+            <input type="text" id="f_category" class="form-control" required placeholder="VD: Tiền nhà, Điện, Nước...">
+          </div>
+          <div class="form-group">
+            <label>Ghi chú</label>
+            <input type="text" id="f_note" class="form-control" placeholder="Ghi chú chi tiết...">
+          </div>
+          <button type="submit" class="btn">Thêm Giao Dịch</button>
+        </form>
       </div>
 
       <div class="card">
-        <h2>
-          <span>📅 Lịch & Nhắc Hẹn</span>
-          <button class="btn-add-reminder" onclick="addReminderPrompt()">+ Thêm lịch hẹn</button>
-        </h2>
         <div class="calendar-header">
-          <button id="prevMonth">&lt;</button>
-          <span id="calendarTitle" style="font-weight: bold; font-size: 14px;">Tháng / Năm</span>
-          <button id="nextMonth">&gt;</button>
+          <button onclick="changeMonth(-1)">◀</button>
+          <h3 id="calendar-month-year" style="margin: 0; border: none;">Tháng 8 / 2026</h3>
+          <button onclick="changeMonth(1)">▶</button>
         </div>
-        <div class="calendar-grid" id="calendarDays">
-          <div class="day-name">CN</div><div class="day-name">T2</div><div class="day-name">T3</div>
-          <div class="day-name">T4</div><div class="day-name">T5</div><div class="day-name">T6</div><div class="day-name">T7</div>
-          </div>
+        
+        <div class="calendar-grid" id="calendar-grid">
+          <div class="calendar-day-name">T2</div>
+          <div class="calendar-day-name">T3</div>
+          <div class="calendar-day-name">T4</div>
+          <div class="calendar-day-name">T5</div>
+          <div class="calendar-day-name">T6</div>
+          <div class="calendar-day-name">T7</div>
+          <div class="calendar-day-name">CN</div>
+        </div>
 
-        <div class="reminder-list" id="reminderList">
-          </div>
+        <h3 style="margin-top: 20px;">🔔 Danh Sách Nhắc Hẹn Đến Hạn</h3>
+        <div class="reminder-list" id="reminder-list"></div>
       </div>
     </div>
 
-    <div class="row-data">
-      <div class="card">
-        <h2>📝 Nhật Ký Giao Dịch</h2>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Loại</th>
-                <th>Ghi chú</th>
-                <th>Danh mục</th>
-                <th>Nguồn</th>
-                <th>Số tiền</th>
-                <th>Thời gian</th>
-                <th>Thao tác</th>
-              </tr>
-            </thead>
-            <tbody id="table-body">
-              </tbody>
-          </table>
-        </div>
-      </div>
+    <div class="card">
+      <h3>📜 Nhật Ký Giao Dịch Thực Tế</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Thời gian</th>
+            <th>Danh mục & Nguồn</th>
+            <th>Nội dung</th>
+            <th>Số tiền</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="transaction-list"></tbody>
+      </table>
     </div>
   </div>
 
+  <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -260,8 +260,13 @@ bot.command('ngansach', async (ctx) => {
 
     const category = match[1].trim().toLowerCase();
     let limit = parseFloat(match[2]);
-    if (match[2].toLowerCase().includes('k')) limit *= 1000;
-    if (match[2].toLowerCase().includes('tr')) limit *= 1000000;
+    const unit = match[2].toLowerCase();
+    
+    if (unit.includes('tr')) {
+      limit *= 1000000;
+    } else if (unit.includes('k')) {
+      limit *= 1000;
+    }
 
     const currentMonth = getCurrentMonth();
     
@@ -364,9 +369,13 @@ bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (
     let rawAmount = parseFloat(ctx.match[2]);
     const dateStr = ctx.match[3];
     const userId = ctx.from.id;
+    const unit = ctx.match[2].toLowerCase();
 
-    if (ctx.match[2].toLowerCase().includes('k')) rawAmount *= 1000;
-    if (ctx.match[2].toLowerCase().includes('tr')) rawAmount *= 1000000;
+    if (unit.includes('tr')) {
+      rawAmount *= 1000000;
+    } else if (unit.includes('k')) {
+      rawAmount *= 1000;
+    }
 
     const [day, month] = dateStr.split('/');
     const currentYear = new Date().getFullYear();
@@ -392,8 +401,13 @@ bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
   try {
     const category = ctx.match[1].trim();
     let amount = parseFloat(ctx.match[2]);
-    if (text.toLowerCase().includes('k')) amount *= 1000;
-    if (text.toLowerCase().includes('tr')) amount *= 1000000;
+    const unit = ctx.match[2].toLowerCase();
+    
+    if (unit.includes('tr')) {
+      amount *= 1000000;
+    } else if (unit.includes('k')) {
+      amount *= 1000;
+    }
 
     const tx = await Transaction.create({
       telegramUserId: ctx.from.id,

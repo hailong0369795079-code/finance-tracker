@@ -1,256 +1,159 @@
-const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenAI } = require('@google/genai');
+require('dotenv').config();
 const mongoose = require('mongoose');
+const { Telegraf, Markup } = require('telegraf');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 const Transaction = require('./models/Transaction');
+const Reminder = require('./models/Reminder');
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Kết nối MongoDB (dùng chung DB với server web)
+const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/expense_manager';
+mongoose.connect(mongoURI)
+  .then(() => console.log('✅ Bot đã kết nối MongoDB thành công'))
+  .catch(err => console.error('❌ Bot lỗi kết nối MongoDB:', err));
 
-// DATABASE CẤU HÌNH & NHẮC HẸN
-const settingSchema = new mongoose.Schema({ telegramUserId: Number, budget: Number });
-const Setting = mongoose.models.Setting || mongoose.model('Setting', settingSchema);
-
-const reminderSchema = new mongoose.Schema({ telegramUserId: Number, title: String, amount: Number, date: String });
-const Reminder = mongoose.models.Reminder || mongoose.model('Reminder', reminderSchema);
-
-// HÀM LẤY NGÀY HIỆN TẠI THEO MÚI GIỜ VIỆT NAM (YYYY-MM-DD)
-function getVNDateString(date = new Date()) {
-  const options = { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' };
-  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(date);
-  let y, m, d;
-  parts.forEach(p => {
-    if (p.type === 'year') y = p.value;
-    if (p.type === 'month') m = p.value;
-    if (p.type === 'day') d = p.value;
-  });
-  return `${y}-${m}-${d}`;
+// Khởi tạo Gemini AI
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "AQ.Ab8RN6J6NMdLfDr0gZUDqbnAl-IcRlaGqgeIDn5sNGdz3yoH8Q";
+let aiModel = null;
+try {
+  const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+  aiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  console.log('✨ Gemini AI đã được kích hoạt trong Bot!');
+} catch (err) {
+  console.error('❌ Lỗi khởi tạo Gemini AI:', err);
 }
 
-// TỰ ĐỘNG QUÉT VÀ NHẮC HẸN MỖI NGÀY VÀO LÚC 8:00 SÁNG
-function startDailyReminderCron() {
-  setInterval(async () => {
-    const now = new Date();
-    const options = { timeZone: 'Asia/Ho_Chi_Minh', hour: 'numeric', minute: 'numeric', hour12: false };
-    const timeParts = new Intl.DateTimeFormat('en-US', options).formatToParts(now);
-    let hour = 0, minute = 0;
-    timeParts.forEach(p => {
-      if (p.type === 'hour') hour = parseInt(p.value);
-      if (p.type === 'minute') minute = parseInt(p.value);
-    });
-
-    // Chạy kiểm tra vào lúc 8 giờ 0 phút sáng mỗi ngày
-    if (hour === 8 && minute === 0) {
-      const todayStr = getVNDateString();
-      try {
-        const dueReminders = await Reminder.find({ date: todayStr });
-        for (const r of dueReminders) {
-          if (r.telegramUserId) {
-            const formattedAmt = new Intl.NumberFormat('vi-VN').format(r.amount);
-            await bot.telegram.sendMessage(r.telegramUserId, `🔔 **NHẮC HẠN THANH TOÁN HÔM NAY!**\n\n📌 Khoản: *${r.title}*\n💰 Số tiền: *${formattedAmt}đ*\n📅 Hạn chót: Hôm nay (${todayStr})`, { parse_mode: 'Markdown' });
-          }
-        }
-      } catch (err) {
-        console.error('Lỗi cron nhắc hẹn:', err);
-      }
-    }
-  }, 60 * 1000); // Kiểm tra mỗi phút một lần
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error('❌ Thiếu BOT_TOKEN trong biến môi trường!');
+  process.exit(1);
 }
-startDailyReminderCron();
 
-// 1. Lệnh /start
+const bot = new Telegraf(BOT_TOKEN);
+
+// Lệnh khởi đầu /start
 bot.start((ctx) => {
-  return ctx.reply('🚀 **Quản Gia Tài Chính AI** đã sẵn sàng!\n\n👉 **Gửi ảnh bill:** AI tự động đọc & lưu.\n👉 **Gõ chữ:** "50k ăn sáng", "2tr lương"\n\n🛠 **CÁC LỆNH HỖ TRỢ:**\n/ngansach <số tiền> - Cài hạn mức\n/thongke - Phân tích chi tiêu tháng\n/nhaclich <tên> | <số tiền> | <YYYY-MM-DD> - Thêm lịch hẹn\n/danhsachnhac - Xem các lịch hẹn\n/excel - Tải file Excel\n/xoa - Xóa giao dịch', { parse_mode: 'Markdown' });
+  ctx.reply('🤖 Chào bạn! Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n📌 **Hướng dẫn:**\n- Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng từ `ai` (VD: `ai tôi nên tiết kiệm thế nào?`)\n- Xóa gần nhất: `/xoa`');
 });
 
-// 2. Lệnh /ngansach
-bot.command('ngansach', async (ctx) => {
-  const userId = ctx.from.id;
-  const text = ctx.message.text.replace('/ngansach', '').trim();
-  const amountMatch = text.match(/(\d+[\d\.]*)\s*(k|tr)?/i);
-  if (!amountMatch) return ctx.reply('⚠️ Định dạng sai. VD: `/ngansach 10tr`', { parse_mode: 'Markdown' });
-
-  let rawAmount = parseFloat(amountMatch[1].replace(/\./g, ''));
-  const unit = amountMatch[2] ? amountMatch[2].toLowerCase() : '';
-  if (unit === 'k') rawAmount *= 1000;
-  if (unit === 'tr') rawAmount *= 1000000;
-
-  await Setting.findOneAndUpdate({ telegramUserId: userId }, { budget: rawAmount }, { upsert: true, new: true });
-  return ctx.reply(`🎯 Đã cập nhật ngân sách mới: **${new Intl.NumberFormat('vi-VN').format(rawAmount)}đ**`, { parse_mode: 'Markdown' });
-});
-
-// 3. Lệnh /nhaclich (Thêm nhắc hẹn nhanh qua Telegram)
-bot.command('nhaclich', async (ctx) => {
-  const userId = ctx.from.id;
-  const text = ctx.message.text.replace('/nhaclich', '').trim();
-  const parts = text.split('|').map(p => p.trim());
-
-  if (parts.length < 3) {
-    return ctx.reply('⚠️ Vui lòng nhập đúng cú pháp:\n`/nhaclich Tiền điện | 450k | 2026-08-05`', { parse_mode: 'Markdown' });
-  }
-
-  const title = parts[0];
-  const amountStr = parts[1];
-  const date = parts[2]; // YYYY-MM-DD
-
-  const amountMatch = amountStr.match(/(\d+[\d\.]*)\s*(k|tr)?/i);
-  if (!amountMatch) return ctx.reply('⚠️ Số tiền không hợp lệ.');
-  let rawAmount = parseFloat(amountMatch[1].replace(/\./g, ''));
-  const unit = amountMatch[2] ? amountMatch[2].toLowerCase() : '';
-  if (unit === 'k') rawAmount *= 1000;
-  if (unit === 'tr') rawAmount *= 1000000;
-
+// 1. Đặt lịch hẹn thanh toán: "hẹn [nội dung] [số tiền] ngày [ngày/tháng]"
+bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
   try {
-    const newR = await Reminder.create({ telegramUserId: userId, title, amount: rawAmount, date });
-    if (global.io) global.io.emit('new_reminder', newR);
-    return ctx.reply(`✅ **Đã thêm lịch nhắc thành công!**\n📌 ${title} - ${new Intl.NumberFormat('vi-VN').format(rawAmount)}đ vào ngày ${date}`, { parse_mode: 'Markdown' });
+    const title = ctx.match[1];
+    let rawAmount = parseFloat(ctx.match[2]);
+    const dateStr = ctx.match[3];
+    const userId = ctx.from.id;
+
+    if (ctx.match[2].toLowerCase().includes('k')) rawAmount *= 1000;
+    if (ctx.match[2].toLowerCase().includes('tr')) rawAmount *= 1000000;
+
+    const [day, month] = dateStr.split('/');
+    const currentYear = new Date().getFullYear();
+    const dueDate = new Date(currentYear, parseInt(month) - 1, parseInt(day));
+
+    await Reminder.create({ telegramUserId: userId, title, amount: rawAmount, dueDate });
+    
+    // Nếu bạn muốn báo qua WebSocket nếu chạy chung tiến trình, hoặc chỉ cần lưu DB
+    ctx.reply(`📅 **Đã đặt lịch thành công!**\n- ${title}: ${rawAmount.toLocaleString('vi-VN')} VNĐ (Ngày ${dateStr})`);
   } catch (err) {
-    return ctx.reply('❌ Lỗi khi tạo lịch hẹn.');
+    console.error('Lỗi hẹn lịch:', err);
+    ctx.reply('❌ Lỗi khi đặt lịch hẹn.');
   }
 });
 
-// 4. Lệnh /danhsachnhac
-bot.command('danhsachnhac', async (ctx) => {
+// 2. Ghi nhận giao dịch nhanh: "[danh mục] [số tiền]" (VD: ăn sáng 35k)
+bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
+  const text = ctx.message.text;
+  if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
+
   try {
-    const list = await Reminder.find().sort({ date: 1 });
-    if (list.length === 0) return ctx.reply('📅 Hiện tại không có lịch hẹn nào.');
-    let msg = `📅 **DANH SÁCH LỊCH HẸN:**\n\n`;
-    list.forEach(r => {
-      const formattedDate = r.date.split('-').reverse().join('/');
-      msg += `📌 *${r.title}* - ${new Intl.NumberFormat('vi-VN').format(r.amount)}đ\n⏰ Hạn: ${formattedDate}\n\n`;
-    });
-    return ctx.reply(msg, { parse_mode: 'Markdown' });
-  } catch (err) {
-    return ctx.reply('❌ Lỗi tải danh sách.');
-  }
-});
+    const category = ctx.match[1].trim();
+    let amount = parseFloat(ctx.match[2]);
+    if (text.toLowerCase().includes('k')) amount *= 1000;
+    if (text.toLowerCase().includes('tr')) amount *= 1000000;
 
-// 5. Lệnh /thongke
-bot.command('thongke', async (ctx) => {
-  const userId = ctx.from.id;
-  try {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0) - 7*3600*1000);
-    const end = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999) - 7*3600*1000);
-
-    const txs = await Transaction.find({ telegramUserId: userId, createdAt: { $gte: start, $lte: end }, type: 'CHI' });
-    const userSetting = await Setting.findOne({ telegramUserId: userId });
-    const BUDGET = userSetting && userSetting.budget ? userSetting.budget : 10000000;
-
-    if (txs.length === 0) return ctx.reply('📊 Tháng này bạn chưa có khoản chi nào!');
-
-    let totalSpent = 0;
-    const catMap = {};
-    txs.forEach(tx => {
-      totalSpent += tx.amount;
-      catMap[tx.category] = (catMap[tx.category] || 0) + tx.amount;
+    const tx = await Transaction.create({
+      telegramUserId: ctx.from.id,
+      amount,
+      type: 'CHI',
+      category,
+      note: 'Ghi nhanh từ Telegram Bot',
+      source: 'BOT'
     });
 
-    let report = `📊 **BÁO CÁO THÁNG NÀY**\n\n💰 Tổng chi: **${new Intl.NumberFormat('vi-VN').format(totalSpent)}đ**\n\n`;
-    for (const [cat, amt] of Object.entries(catMap)) {
-      const p = ((amt / totalSpent) * 100).toFixed(1);
-      report += `🔹 ${cat}: ${new Intl.NumberFormat('vi-VN').format(amt)}đ (${p}%)\n`;
+    await ctx.reply(
+      `✅ Đã ghi nhận:\n📂 **${category}**: **${amount.toLocaleString('vi-VN')} VNĐ**`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Xóa giao dịch này', `delete_tx_${tx._id}`)]
+        ])
+      }
+    );
+  } catch (err) {
+    console.error('Lỗi ghi giao dịch:', err);
+    ctx.reply('❌ Không thể ghi nhận giao dịch.');
+  }
+});
+
+// 3. Xử lý tư vấn tài chính với Gemini AI (Tin nhắn bắt đầu bằng 'ai ' hoặc 'gemini ')
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+  if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
+
+  if (aiModel && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().startsWith('gemini '))) {
+    try {
+      await ctx.sendChatAction('typing');
+      const queryText = text.replace(/^(ai|gemini)\s+/i, '');
+      
+      // Lấy 15 giao dịch gần đây để AI có ngữ cảnh phân tích
+      const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(15);
+      const summary = transactions.map(t => `- ${t.category}: ${t.amount.toLocaleString('vi-VN')}đ (${t.type})`).join('\n');
+
+      const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi/Yêu cầu của tôi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
+      
+      const result = await aiModel.generateContent(prompt);
+      const responseText = result.response.text();
+
+      return ctx.reply(responseText || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời lúc này.');
+    } catch (err) {
+      console.error('Lỗi Gemini AI:', err);
+      return ctx.reply('❌ Đã xảy ra lỗi khi kết nối với Gemini AI.');
     }
-    const percent = (totalSpent / BUDGET) * 100;
-    report += `\n🎯 Ngân sách: ${new Intl.NumberFormat('vi-VN').format(BUDGET)}đ (${percent.toFixed(1)}%)`;
-    return ctx.reply(report, { parse_mode: 'Markdown' });
-  } catch (e) {
-    return ctx.reply('❌ Lỗi tạo thống kê.');
   }
 });
 
-// 6. Lệnh /excel
-bot.command('excel', async (ctx) => {
+// Xóa nhanh qua nút bấm Inline Keyboard
+bot.action(/^delete_tx_(.+)$/, async (ctx) => {
   try {
-    const txs = await Transaction.find({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
-    if (txs.length === 0) return ctx.reply('Chưa có dữ liệu.');
-    let csv = 'Ngay,Loai,So Tien,Danh Muc,Noi Dung\n';
-    txs.forEach(tx => {
-      const date = new Date(tx.createdAt).toLocaleDateString('vi-VN');
-      csv += `${date},${tx.type},${tx.amount},${tx.category},${tx.note.replace(/,/g, ' ')}\n`;
-    });
-    const buffer = Buffer.from('\ufeff' + csv, 'utf8');
-    await ctx.replyWithDocument({ source: buffer, filename: `Bao_Cao.csv` }, { caption: '📑 File Excel của bạn đây!' });
-  } catch (e) { return ctx.reply('❌ Lỗi xuất file.'); }
+    const txId = ctx.match[1];
+    const deletedTx = await Transaction.findByIdAndDelete(txId);
+    if (deletedTx) {
+      await ctx.editMessageText(`🗑️ **Đã xóa giao dịch thành công!**\n(${deletedTx.category} - ${deletedTx.amount.toLocaleString('vi-VN')} VNĐ)`, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.answerCbQuery('Giao dịch không tồn tại hoặc đã bị xóa.');
+    }
+  } catch (err) {
+    console.error(err);
+    await ctx.answerCbQuery('Lỗi khi xóa.');
+  }
 });
 
-// 7. Lệnh /xoa
+// Lệnh /xoa để xóa giao dịch cuối cùng của user
 bot.command('xoa', async (ctx) => {
   try {
-    const txs = await Transaction.find({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 }).limit(5);
-    if (txs.length === 0) return ctx.reply('✨ Không có giao dịch nào.');
-    for (let tx of txs) {
-      const amt = new Intl.NumberFormat('vi-VN').format(tx.amount);
-      const time = new Date(tx.createdAt).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
-      await ctx.reply(`🔴 [${time}] ${tx.note} : ${amt}đ`, Markup.inlineKeyboard([Markup.button.callback('❌ Xóa', `del_${tx._id}`)]));
-    }
-  } catch (e) {}
-});
+    const lastTx = await Transaction.findOne({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
+    if (!lastTx) return ctx.reply('📭 Không tìm thấy giao dịch nào gần đây.');
 
-bot.action(/^del_(.+)$/, async (ctx) => {
-  try {
-    const deleted = await Transaction.findByIdAndDelete(ctx.match[1]);
-    if (deleted) {
-      if (global.io) global.io.emit('delete_transaction', ctx.match[1]);
-      await ctx.editMessageText(`✅ Đã xóa: ${deleted.note}`);
-    }
-  } catch (e) {}
-});
-
-// 8. XỬ LÝ ẢNH BILL (Gemini AI)
-bot.on('photo', async (ctx) => {
-  const processing = await ctx.reply('🤖 Đang đọc bill...');
-  try {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const link = await ctx.telegram.getFileLink(photo.file_id);
-    const res = await fetch(link.href);
-    const buf = Buffer.from(await res.arrayBuffer()).toString('base64');
-
-    const prompt = `Đọc bill và trả về JSON chuẩn: {"amount": số_tiền, "type": "CHI", "note": "nội dung ngắn gọn", "category": "Ăn uống/Mua sắm/Di chuyển/Hóa đơn/Khác"}`;
-    const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ inlineData: { mimeType: 'image/jpeg', data: buf } }, prompt]
-    });
-
-    const parsed = JSON.parse(result.text.trim().replace(/```json/g, '').replace(/```/g, '').trim());
-    const newTx = await Transaction.create({ telegramUserId: ctx.from.id, type: parsed.type || 'CHI', amount: parsed.amount, note: parsed.note || 'Bill', category: parsed.category || 'Khác', source: 'AI-BILL' });
-    if (global.io) global.io.emit('new_transaction', newTx);
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, processing.message_id);
-    return ctx.reply(`✅ Đã ghi nhận bill: ${new Intl.NumberFormat('vi-VN').format(parsed.amount)}đ (${parsed.note})`);
-  } catch (e) {
-    try { await ctx.telegram.deleteMessage(ctx.chat.id, processing.message_id); } catch(err){}
-    return ctx.reply('❌ Không đọc được ảnh bill. Bạn nhập tay giúp mình nhé!');
+    await Transaction.findByIdAndDelete(lastTx._id);
+    ctx.reply(`🗑️ Đã xóa giao dịch gần nhất: ${lastTx.category} - ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
+  } catch (err) {
+    console.error(err);
+    ctx.reply('❌ Lỗi khi xóa.');
   }
 });
 
-// 9. XỬ LÝ TEXT GHI NHANH
-bot.on('text', async (ctx) => {
-  const text = ctx.message.text.trim();
-  if (text.startsWith('/')) return;
-
-  const match = text.match(/(\d+[\d\.]*)\s*(k|tr)?/i);
-  if (!match) return;
-
-  let amt = parseFloat(match[1].replace(/\./g, ''));
-  const unit = match[2] ? match[2].toLowerCase() : '';
-  const note = text.replace(match[0], '').trim() || 'Chi tiêu khác';
-  if (unit === 'k') amt *= 1000;
-  if (unit === 'tr') amt *= 1000000;
-
-  let type = 'CHI', cat = 'Chi tiêu hàng ngày';
-  const lower = note.toLowerCase();
-  if (lower.includes('lương') || lower.includes('thu')) { type = 'THU'; cat = 'Thu nhập'; }
-  else if (lower.includes('ăn') || lower.includes('cafe')) cat = 'Ăn uống';
-  else if (lower.includes('xăng') || lower.includes('grab')) cat = 'Di chuyển';
-
-  const newTx = await Transaction.create({ telegramUserId: ctx.from.id, type, amount: amt, note, category: cat, source: 'BOT' });
-  if (global.io) global.io.emit('new_transaction', newTx);
-  return ctx.reply(`✅ Đã lưu: ${note} - ${new Intl.NumberFormat('vi-VN').format(amt)}đ`);
-});
-
+// Khởi chạy bot
+bot.launch().then(() => console.log('🤖 Telegram Bot đang chạy thành công!'));
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-module.exports = bot;

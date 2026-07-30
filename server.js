@@ -4,7 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const Transaction = require('./models/Transaction');
 const Reminder = require('./models/Reminder');
@@ -17,12 +17,13 @@ global.io = io;
 app.use(express.json());
 app.use(express.static('public'));
 
-// Khởi tạo Gemini AI bằng API Key bạn vừa cung cấp
+// Khởi tạo Gemini AI chuẩn Google
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "AQ.Ab8RN6J6NMdLfDr0gZUDqbnAl-IcRlaGqgeIDn5sNGdz3yoH8Q";
-let ai = null;
+let aiModel = null;
 try {
-  ai = new GoogleGenAI({ apiKey: GEMINI_KEY });
-  console.log('✨ Gemini AI đã được khởi tạo thành công với API Key cấu hình sẵn!');
+  const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+  aiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  console.log('✨ Gemini AI đã được khởi tạo thành công!');
 } catch (err) {
   console.error('❌ Lỗi khởi tạo Gemini AI:', err);
 }
@@ -131,7 +132,6 @@ if (BOT_TOKEN) {
     ctx.reply('🤖 Chào bạn! Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n📌 **Hướng dẫn:**\n- Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n- Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n- Hỏi AI: Nhắn tin bắt đầu bằng `ai` (VD: `ai tôi nên phân bổ chi tiêu thế nào?`)\n- Xóa gần nhất: `/xoa`');
   });
 
-  // Hẹn lịch thanh toán
   bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
     try {
       const title = ctx.match[1];
@@ -155,7 +155,6 @@ if (BOT_TOKEN) {
     }
   });
 
-  // Ghi nhận giao dịch nhanh
   bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
@@ -192,28 +191,24 @@ if (BOT_TOKEN) {
     }
   });
 
-  // Xử lý trò chuyện/tư vấn tài chính với Gemini AI
   bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
 
-    if (ai && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().startsWith('gemini '))) {
+    if (aiModel && (text.toLowerCase().startsWith('ai ') || text.toLowerCase().startsWith('gemini '))) {
       try {
         await ctx.sendChatAction('typing');
         const queryText = text.replace(/^(ai|gemini)\s+/i, '');
         
-        // Lấy 15 giao dịch gần đây để AI phân tích ngữ cảnh
         const transactions = await Transaction.find().sort({ createdAt: -1 }).limit(15);
         const summary = transactions.map(t => `- ${t.category}: ${t.amount.toLocaleString('vi-VN')}đ (${t.type})`).join('\n');
 
         const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi/Yêu cầu của tôi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
         
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt
-        });
+        const result = await aiModel.generateContent(prompt);
+        const responseText = result.response.text();
 
-        return ctx.reply(response.text || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời lúc này.');
+        return ctx.reply(responseText || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời lúc này.');
       } catch (err) {
         console.error('Lỗi Gemini AI:', err);
         return ctx.reply('❌ Đã xảy ra lỗi khi kết nối với Gemini AI.');

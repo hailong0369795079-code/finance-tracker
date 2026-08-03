@@ -34,6 +34,26 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// ==================== HÀM XỬ LÝ SỐ TIỀN CHUẨN XÁC ====================
+function parseAmount(amountStr) {
+  let cleanStr = amountStr.toLowerCase().trim();
+  let multiplier = 1;
+
+  if (cleanStr.includes('tr')) {
+    multiplier = 1000000;
+    cleanStr = cleanStr.replace('tr', '');
+  } else if (cleanStr.includes('k')) {
+    multiplier = 1000;
+    cleanStr = cleanStr.replace('k', '');
+  }
+
+  // Xóa các dấu phẩy hoặc chấm phân cách cũ nếu có
+  cleanStr = cleanStr.replace(/[,.]/g, '');
+  const num = parseFloat(cleanStr);
+  
+  return isNaN(num) ? 0 : num * multiplier;
+}
+
 // ==================== HÀM NGÂN SÁCH ====================
 
 function getCurrentMonth() {
@@ -68,7 +88,6 @@ async function getBudgetSpent(userId, category, month) {
 
 // ==================== THỐNG KÊ & XUẤT EXCEL ====================
 
-// Hàm tạo file Excel thống kê
 async function generateExcelReport(userId) {
   try {
     const transactions = await Transaction.find({ telegramUserId: userId }).sort({ createdAt: -1 });
@@ -77,7 +96,6 @@ async function generateExcelReport(userId) {
 
     const workbook = new ExcelJS.Workbook();
     
-    // Sheet 1: Chi tiết giao dịch
     const sheet1 = workbook.addWorksheet('Giao dịch');
     sheet1.columns = [
       { header: 'Danh mục', key: 'category', width: 20 },
@@ -97,11 +115,9 @@ async function generateExcelReport(userId) {
       });
     });
 
-    // Định dạng header
     sheet1.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sheet1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
 
-    // Sheet 2: Thống kê theo danh mục
     const categoryStats = {};
     transactions.forEach(tx => {
       if (!categoryStats[tx.category]) {
@@ -127,9 +143,8 @@ async function generateExcelReport(userId) {
     });
 
     sheet2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: 'FF70AD47' };
+    sheet2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF70AD47' } };
 
-    // Sheet 3: Tóm tắt tháng
     const sheet3 = workbook.addWorksheet('Tóm tắt');
     const now = new Date();
     const thisMonth = transactions.filter(t => {
@@ -150,22 +165,20 @@ async function generateExcelReport(userId) {
       { metric: '📝 Số giao dịch tháng này', value: thisMonth.length },
       { metric: '📈 Trung bình/ngày', value: avgDaily.toFixed(0).toLocaleString('vi-VN') + ' VNĐ' },
       { metric: '💰 Tổng chi toàn thời gian', value: totalAmount.toLocaleString('vi-VN') + ' VNĐ' },
-      { metric: '📌 Danh mục nhiều nhất', value: Object.keys(categoryStats).reduce((a, b) => categoryStats[a] > categoryStats[b] ? a : b) }
+      { metric: '📌 Danh mục nhiều nhất', value: Object.keys(categoryStats).reduce((a, b) => categoryStats[a] > categoryStats[b] ? a : b, '') }
     ]);
 
     sheet3.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: 'FFC65911' };
+    sheet3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC65911' } };
 
     const timestamp = new Date().toISOString().slice(0, 10);
     const filename = `Bao_Cao_Tai_Chinh_${timestamp}.xlsx`;
-    const filepath = path.join(__dirname, 'exports', filename);
-    
-    // Tạo thư mục exports nếu chưa có
     const exportDir = path.join(__dirname, 'exports');
     if (!fs.existsSync(exportDir)) {
       fs.mkdirSync(exportDir, { recursive: true });
     }
 
+    const filepath = path.join(exportDir, filename);
     await workbook.xlsx.writeFile(filepath);
     return filepath;
   } catch (err) {
@@ -174,11 +187,9 @@ async function generateExcelReport(userId) {
   }
 }
 
-// Hàm tạo báo cáo text thống kê
 async function getStatsSummary(userId) {
   try {
     const transactions = await Transaction.find({ telegramUserId: userId }).sort({ createdAt: -1 });
-    
     if (transactions.length === 0) return '📭 Chưa có giao dịch nào.';
 
     const categoryStats = {};
@@ -211,66 +222,51 @@ async function getStatsSummary(userId) {
 
     return report;
   } catch (err) {
-    console.error('Lỗi tính toán:', err);
     return '❌ Lỗi khi tính toán.';
   }
 }
 
 // ==================== BOT COMMANDS ====================
 
-// Lệnh /start
 bot.start((ctx) => {
   ctx.reply(
     '🤖 **Chào bạn!** Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n' +
     '📌 **HƯỚNG DẪN SỬ DỤNG:**\n' +
-    '• Ghi nhanh: `ăn sáng 35k` hoặc `tiền nhà 3tr`\n' +
+    '• Ghi nhanh: `ăn sáng 35k`, `ăn trưa 28000` hoặc `tiền nhà 3tr`\n' +
     '• Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n' +
     '• 💰 Đặt ngân sách: `/ngansach ăn sáng 500k`\n' +
     '• 📊 Xem thống kê: `/thongke`\n' +
     '• 📊 Xem ngân sách: `/xemngansach`\n' +
     '• 📥 Xuất Excel: `/excel`\n' +
     '• 🤖 Hỏi AI: `ai tôi nên tiết kiệm thế nào?`\n' +
-    '• ❌ Xóa gần nhất: `/xoa`\n\n' +
-    '💡 _Hãy bắt đầu ghi chi tiêu ngay!_',
+    '• ❌ Xóa gần nhất: `/xoa`',
     { parse_mode: 'Markdown' }
   );
 });
 
-// Lệnh /thongke - Xem thống kê
 bot.command('thongke', async (ctx) => {
   try {
     await ctx.sendChatAction('typing');
     const summary = await getStatsSummary(ctx.from.id);
     ctx.reply(summary, { parse_mode: 'Markdown' });
   } catch (err) {
-    console.error('Lỗi thống kê:', err);
     ctx.reply('❌ Lỗi khi lấy thống kê.');
   }
 });
 
-// Lệnh /ngansach - Đặt ngân sách cho danh mục
 bot.command('ngansach', async (ctx) => {
   try {
     const args = ctx.message.text.split(' ').slice(1).join(' ');
-    const match = args.match(/^(.+?)\s+(\d+[k|tr]?)$/i);
+    const match = args.match(/^(.+?)\s+([\d.,]+[k|tr]?)$/i);
     
     if (!match) {
-      return ctx.reply('❌ Sai định dạng!\n\nUse: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
+      return ctx.reply('❌ Sai định dạng!\n\nVí dụ: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
     }
 
     const category = match[1].trim().toLowerCase();
-    let limit = parseFloat(match[2]);
-    const unit = match[2].toLowerCase();
-    
-    if (unit.includes('tr')) {
-      limit *= 1000000;
-    } else if (unit.includes('k')) {
-      limit *= 1000;
-    }
-
+    const limit = parseAmount(match[2]);
     const currentMonth = getCurrentMonth();
     
-    // Lưu ngân sách vào transaction (một bản ghi đặc biệt)
     await Transaction.updateOne(
       { telegramUserId: ctx.from.id, category, budget_month: currentMonth },
       { budget_limit: limit, budget_month: currentMonth },
@@ -278,24 +274,17 @@ bot.command('ngansach', async (ctx) => {
     );
 
     ctx.reply(
-      `✅ **Đã đặt ngân sách!**\n` +
-      `📂 Danh mục: ${category}\n` +
-      `💰 Giới hạn: ${limit.toLocaleString('vi-VN')} VNĐ\n` +
-      `📅 Tháng: ${currentMonth}`,
+      `✅ **Đã đặt ngân sách!**\n📂 Danh mục: ${category}\n💰 Giới hạn: ${limit.toLocaleString('vi-VN')} VNĐ\n📅 Tháng: ${currentMonth}`,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
-    console.error('Lỗi đặt ngân sách:', err);
     ctx.reply('❌ Lỗi khi đặt ngân sách.');
   }
 });
 
-// Lệnh /xemngansach - Xem ngân sách và tình trạng chi tiêu
 bot.command('xemngansach', async (ctx) => {
   try {
     const currentMonth = getCurrentMonth();
-    
-    // Lấy tất cả ngân sách của user tháng này
     const budgets = await Transaction.find({
       telegramUserId: ctx.from.id,
       budget_month: currentMonth,
@@ -303,7 +292,7 @@ bot.command('xemngansach', async (ctx) => {
     }).distinct('category');
 
     if (budgets.length === 0) {
-      return ctx.reply('📭 Chưa có ngân sách nào.\n\nUse: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
+      return ctx.reply('📭 Chưa có ngân sách nào.\n\nVí dụ: `/ngansach ăn sáng 500k`', { parse_mode: 'Markdown' });
     }
 
     let report = `💰 **NGÂN SÁCH THÁNG ${currentMonth}**\n\n`;
@@ -333,12 +322,10 @@ bot.command('xemngansach', async (ctx) => {
 
     ctx.reply(report, { parse_mode: 'Markdown' });
   } catch (err) {
-    console.error('Lỗi xem ngân sách:', err);
     ctx.reply('❌ Lỗi khi lấy ngân sách.');
   }
 });
 
-// Lệnh /excel - Xuất file Excel
 bot.command('excel', async (ctx) => {
   try {
     await ctx.sendChatAction('upload_document');
@@ -348,34 +335,23 @@ bot.command('excel', async (ctx) => {
       return ctx.reply('📭 Chưa có dữ liệu để xuất.');
     }
 
-    const filename = path.basename(filepath);
     await ctx.replyWithDocument(
       { source: filepath },
       { caption: `📊 Báo cáo tài chính - ${new Date().toLocaleDateString('vi-VN')}` }
     );
 
-    // Xóa file tạm
     fs.unlinkSync(filepath);
   } catch (err) {
-    console.error('Lỗi xuất Excel:', err);
     ctx.reply('❌ Lỗi khi xuất file Excel.');
   }
 });
 
-// Đặt lịch hẹn thanh toán
-bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
+bot.hears(/^hẹn\s+(.+?)\s+([\d.,]+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (ctx) => {
   try {
     const title = ctx.match[1];
-    let rawAmount = parseFloat(ctx.match[2]);
+    const rawAmount = parseAmount(ctx.match[2]);
     const dateStr = ctx.match[3];
     const userId = ctx.from.id;
-    const unit = ctx.match[2].toLowerCase();
-
-    if (unit.includes('tr')) {
-      rawAmount *= 1000000;
-    } else if (unit.includes('k')) {
-      rawAmount *= 1000;
-    }
 
     const [day, month] = dateStr.split('/');
     const currentYear = new Date().getFullYear();
@@ -388,26 +364,20 @@ bot.hears(/^hẹn\s+(.+?)\s+(\d+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, async (
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
-    console.error('Lỗi hẹn lịch:', err);
     ctx.reply('❌ Lỗi khi đặt lịch hẹn.');
   }
 });
 
-// Ghi nhận giao dịch nhanh
-bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
+// Fix lỗi nhận diện số tiền (hỗ trợ cả 28k lẫn 28000)
+bot.hears(/^(.+?)\s+([\d.,]+[k|tr]?)$/i, async (ctx) => {
   const text = ctx.message.text;
   if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
 
   try {
     const category = ctx.match[1].trim();
-    let amount = parseFloat(ctx.match[2]);
-    const unit = ctx.match[2].toLowerCase();
-    
-    if (unit.includes('tr')) {
-      amount *= 1000000;
-    } else if (unit.includes('k')) {
-      amount *= 1000;
-    }
+    const amount = parseAmount(ctx.match[2]);
+
+    if (amount <= 0) return;
 
     const tx = await Transaction.create({
       telegramUserId: ctx.from.id,
@@ -428,12 +398,10 @@ bot.hears(/^(.+?)\s+(\d+[k|tr]?)$/i, async (ctx) => {
       }
     );
   } catch (err) {
-    console.error('Lỗi ghi giao dịch:', err);
     ctx.reply('❌ Không thể ghi nhận giao dịch.');
   }
 });
 
-// Hỏi AI tư vấn tài chính
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
   if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn')) return;
@@ -449,17 +417,13 @@ bot.on('text', async (ctx) => {
       const prompt = `Bạn là trợ lý tài chính thông minh. Dưới đây là các giao dịch gần đây của tôi:\n${summary}\n\nCâu hỏi: "${queryText}". Hãy trả lời ngắn gọn, thực tế và hữu ích bằng tiếng Việt.`;
       
       const result = await aiModel.generateContent(prompt);
-      const responseText = result.response.text();
-
-      return ctx.reply(responseText || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời.');
+      return ctx.reply(result.response.text() || 'Xin lỗi, tôi chưa thể đưa ra câu trả lời.');
     } catch (err) {
-      console.error('Lỗi Gemini AI:', err);
       return ctx.reply('❌ Lỗi khi kết nối với Gemini AI.');
     }
   }
 });
 
-// Xóa giao dịch qua nút bấm
 bot.action(/^delete_tx_(.+)$/, async (ctx) => {
   try {
     const txId = ctx.match[1];
@@ -473,12 +437,10 @@ bot.action(/^delete_tx_(.+)$/, async (ctx) => {
       await ctx.answerCbQuery('Giao dịch không tồn tại.');
     }
   } catch (err) {
-    console.error(err);
     await ctx.answerCbQuery('Lỗi khi xóa.');
   }
 });
 
-// Xóa giao dịch cuối cùng
 bot.command('xoa', async (ctx) => {
   try {
     const lastTx = await Transaction.findOne({ telegramUserId: ctx.from.id }).sort({ createdAt: -1 });
@@ -487,12 +449,10 @@ bot.command('xoa', async (ctx) => {
     await Transaction.findByIdAndDelete(lastTx._id);
     ctx.reply(`🗑️ Đã xóa: ${lastTx.category} - ${lastTx.amount.toLocaleString('vi-VN')} VNĐ`);
   } catch (err) {
-    console.error(err);
     ctx.reply('❌ Lỗi khi xóa.');
   }
 });
 
-// Khởi chạy bot
 bot.launch().then(() => console.log('🤖 Telegram Bot đang chạy thành công!'));
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

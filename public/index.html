@@ -40,12 +40,23 @@
     /* ====== WIDGET ĐỒNG HỒ & LỊCH ====== */
     .header-top { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
     .header-title h1 { margin: 0 0 5px 0; color: #fff; font-size: 1.8rem; }
-    .header-total { font-size: 1.1rem; color: var(--text-muted); }
     
     .datetime-widget { text-align: right; background: var(--bg-card); padding: 10px 20px; border-radius: 8px; border: 1px solid var(--border); }
     .time-display { font-size: 2rem; font-weight: bold; color: #fff; letter-spacing: 2px; font-family: monospace; margin-bottom: 5px; }
     .date-display { font-size: 0.95rem; color: var(--text-muted); }
     .lunar-display { color: var(--c-warn); font-weight: bold; }
+
+    /* ====== CARD THỐNG KÊ THEO THÁNG & CẢNH BÁO ====== */
+    .stats-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+    .month-picker-container { display: flex; align-items: center; gap: 10px; }
+    .month-picker-container input { background: var(--bg-main); border: 1px solid var(--border); color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 0.95rem; cursor: pointer; }
+    
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+    .stat-box { background: var(--bg-main); padding: 15px; border-radius: 8px; border: 1px solid var(--border); text-align: center; }
+    .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 5px; }
+    .stat-value { font-size: 1.25rem; font-weight: bold; }
+
+    .alert-banner { margin-top: 15px; padding: 12px 15px; border-radius: 8px; font-weight: bold; text-align: center; font-size: 0.95rem; display: none; }
 
     /* Forms */
     .form-group { margin-bottom: 12px; }
@@ -86,11 +97,10 @@
 <body>
 
   <div class="container">
-    <!-- HEADER: Tích hợp Widget thời gian & Tổng chi -->
+    <!-- HEADER: Tích hợp Widget thời gian -->
     <header class="header-top">
       <div class="header-title">
         <h1>📊 Bảng Điều Khiển Tài Chính</h1>
-        <div class="header-total">Tổng chi: <span id="total-spent" style="color: var(--c-chi); font-size: 1.3rem; font-weight: bold;">0 VNĐ</span></div>
       </div>
       <div class="datetime-widget">
         <div class="time-display" id="clock-display">00:00:00</div>
@@ -100,6 +110,35 @@
         </div>
       </div>
     </header>
+
+    <!-- KHU VỰC BÁO CÁO TÀI CHÍNH THÁNG & CẢNH BÁO (MỚI) -->
+    <div class="card" style="border-left: 4px solid var(--c-dautu);">
+      <div class="stats-header">
+        <h3 style="margin: 0; border: none;">📌 Báo Cáo Tài Chính Tháng</h3>
+        <div class="month-picker-container">
+          <label for="stats-month" style="color: var(--text-muted); font-size: 0.9rem;">Chọn Tháng:</label>
+          <input type="month" id="stats-month">
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">🟢 Thu Nhập Tháng</div>
+          <div class="stat-value" id="month-thu" style="color: var(--c-thu);">0 VNĐ</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">🔴 Chi Tiêu Tháng</div>
+          <div class="stat-value" id="month-chi" style="color: var(--c-chi);">0 VNĐ</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">💰 Số Dư Còn Lại</div>
+          <div class="stat-value" id="month-balance" style="color: #fff;">0 VNĐ</div>
+        </div>
+      </div>
+
+      <!-- KHUNG CẢNH BÁO TÀI CHÍNH TỰ ĐỘNG -->
+      <div id="finance-alert" class="alert-banner"></div>
+    </div>
 
     <div class="top-section">
       <!-- Cột Trái -->

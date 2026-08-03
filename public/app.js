@@ -33,24 +33,26 @@ function startLiveClock() {
   setInterval(updateTime, 1000); // Lặp lại mỗi 1 giây
 }
 
-// ==================== TÍNH NĂNG MỚI: VẼ BIỂU ĐỒ ====================
+// ==================== HÀM VẼ BIỂU ĐỒ (ĐÃ FIX HIỂN THỊ) ====================
 function updateFinanceChart(transactions) {
-  const ctx = document.getElementById('financeChart').getContext('2d');
+  const canvas = document.getElementById('financeChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
   
-  // 1. Tạo mảng 7 ngày gần nhất
   const last7Days = [];
   const chiData = [0, 0, 0, 0, 0, 0, 0];
   const thuData = [0, 0, 0, 0, 0, 0, 0];
 
+  // Lấy 7 ngày gần nhất
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    // Format dạng dd/MM
     last7Days.push(`${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
 
-  // 2. Gom nhóm dữ liệu giao dịch vào 7 ngày này
+  // Phân loại data
   transactions.forEach(tx => {
+    if (!tx.createdAt) return;
     const txDate = new Date(tx.createdAt);
     const dateStr = `${String(txDate.getDate()).padStart(2, '0')}/${String(txDate.getMonth() + 1).padStart(2, '0')}`;
     const index = last7Days.indexOf(dateStr);
@@ -61,52 +63,94 @@ function updateFinanceChart(transactions) {
     }
   });
 
-  // 3. Cập nhật hoặc Khởi tạo Biểu đồ
-  if (financeChartInstance) {
-    financeChartInstance.data.labels = last7Days;
-    financeChartInstance.data.datasets[0].data = chiData;
-    financeChartInstance.data.datasets[1].data = thuData;
-    financeChartInstance.update();
-  } else {
-    financeChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: last7Days,
-        datasets: [
-          {
-            label: 'Chi Tiêu (VNĐ)',
-            data: chiData,
-            borderColor: '#ef5350', // Màu đỏ var(--c-chi)
-            backgroundColor: 'rgba(239, 83, 80, 0.1)',
-            borderWidth: 2,
-            tension: 0.4, // Tạo độ uốn lượn
-            fill: true
-          },
-          {
-            label: 'Thu Nhập (VNĐ)',
-            data: thuData,
-            borderColor: '#26a69a', // Màu xanh lá var(--c-thu)
-            backgroundColor: 'rgba(38, 166, 154, 0.1)',
-            borderWidth: 2,
-            tension: 0.4,
-            fill: true
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { labels: { color: '#d1d4dc' } } // Chữ màu trắng xám
+  try {
+    if (financeChartInstance) {
+      financeChartInstance.data.labels = last7Days;
+      financeChartInstance.data.datasets[0].data = chiData;
+      financeChartInstance.data.datasets[1].data = thuData;
+      financeChartInstance.update();
+    } else {
+      financeChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: last7Days,
+          datasets: [
+            { label: 'Chi Tiêu (VNĐ)', data: chiData, borderColor: '#ef5350', backgroundColor: 'rgba(239, 83, 80, 0.1)', borderWidth: 2, tension: 0.3, fill: true },
+            { label: 'Thu Nhập (VNĐ)', data: thuData, borderColor: '#26a69a', backgroundColor: 'rgba(38, 166, 154, 0.1)', borderWidth: 2, tension: 0.3, fill: true }
+          ]
         },
-        scales: {
-          x: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' } },
-          y: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' }, beginAtZero: true }
+        options: {
+          responsive: true,
+          maintainAspectRatio: false, // 🔥 FIX LỖI TÀNG HÌNH BIỂU ĐỒ
+          plugins: { legend: { labels: { color: '#d1d4dc' } } },
+          scales: {
+            x: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' } },
+            y: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' }, beginAtZero: true }
+          }
         }
-      }
-    });
+      });
+    }
+  } catch (e) {
+    console.error("Lỗi vẽ biểu đồ:", e);
   }
 }
 
+// ==================== CÁC HÀM XỬ LÝ NÚT BẤM (ĐÃ FIX LỖI KHÔNG XÓA ĐƯỢC) ====================
+
+async function deleteReminder(id) {
+  if (confirm('Xóa lịch hẹn này?')) {
+    try {
+      const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('API chưa sẵn sàng'); // Ép văng lỗi để chạy Catch bên dưới
+      fetchData();
+    } catch (err) {
+      // 🔥 Xóa mạnh ở LocalStorage nếu API bị lỗi
+      allReminders = allReminders.filter(r => String(r._id) !== String(id));
+      renderReminders(allReminders);
+      saveToLocalStorage();
+    }
+  }
+}
+
+async function payReminder(id, title, amount) {
+  if (confirm(`Bạn xác nhận đã thanh toán: ${title} (${amount.toLocaleString('vi-VN')} VNĐ)?\n\nHệ thống sẽ tự động trừ vào chi tiêu thực tế.`)) {
+    try {
+      const res = await fetch(`/api/reminders/${id}/pay`, { method: 'POST' });
+      if (!res.ok) throw new Error('API chưa sẵn sàng');
+      fetchData();
+      alert(`✅ Đã ghi nhận chi tiêu: ${title}`);
+    } catch (err) {
+      // 🔥 Xử lý mạnh ở Local nếu API bị lỗi
+      allReminders = allReminders.map(r => String(r._id) === String(id) ? { ...r, isPaid: true } : r);
+      
+      const newLocalTx = {
+        _id: Date.now().toString(),
+        telegramUserId: 0, amount: amount, type: 'CHI', category: title,
+        note: 'Thanh toán từ lịch hẹn', source: 'WEB', createdAt: new Date()
+      };
+      allTransactions.unshift(newLocalTx);
+      
+      renderTransactions(allTransactions); // Hàm này sẽ gọi updateFinanceChart luôn
+      renderReminders(allReminders);
+      saveToLocalStorage();
+    }
+  }
+}
+
+async function deleteTx(id) {
+  if (confirm('Xóa giao dịch này?')) {
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('API chưa sẵn sàng');
+      fetchData();
+    } catch (err) {
+      // 🔥 Xóa mạnh ở LocalStorage nếu API bị lỗi
+      allTransactions = allTransactions.filter(t => String(t._id) !== String(id));
+      renderTransactions(allTransactions); // Cập nhật lại list và biểu đồ
+      saveToLocalStorage();
+    }
+  }
+}
 // ==================== LOCALSTORAGE FUNCTIONS ====================
 
 function saveToLocalStorage() {

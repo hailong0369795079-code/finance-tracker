@@ -32,14 +32,17 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-const bot = new Telegraf(BOT_TOKEN);
+const bot = new Telegraf(BOT_TOKEN, {
+  handlerTimeout: 90000
+});
 
-// ==================== HÀM XỬ LÝ SỐ TIỀN CHUẨN XÁC ====================
+// ==================== HÀM XỬ LÝ SỐ TIỀN CHUẨN XÁC (ĐÃ FIX KHÔNG BỊ LỖI CHỮ TR) ====================
 function parseAmount(amountStr) {
   if (!amountStr) return 0;
   let cleanStr = amountStr.toString().toLowerCase().trim();
   let multiplier = 1;
 
+  // CHỈ KIỂM TRA HẬU TỐ (KÝ TỰ CUỐI CÙNG CỦA SỐ TIỀN)
   if (cleanStr.endsWith('tr')) {
     multiplier = 1000000;
     cleanStr = cleanStr.slice(0, -2);
@@ -48,6 +51,7 @@ function parseAmount(amountStr) {
     cleanStr = cleanStr.slice(0, -1);
   }
 
+  // Lọc chỉ giữ lại chữ số và dấu chấm/phẩy
   cleanStr = cleanStr.replace(/[^0-9.,]/g, '').replace(',', '.');
   const num = parseFloat(cleanStr);
   
@@ -93,6 +97,7 @@ async function generateExcelReport(userId) {
 
     const workbook = new ExcelJS.Workbook();
     
+    // Sheet 1: Chi tiết giao dịch
     const sheet1 = workbook.addWorksheet('Giao dịch');
     sheet1.columns = [
       { header: 'Danh mục', key: 'category', width: 20 },
@@ -115,6 +120,7 @@ async function generateExcelReport(userId) {
     sheet1.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sheet1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
 
+    // Sheet 2: Thống kê theo danh mục
     const categoryStats = {};
     transactions.forEach(tx => {
       if (!categoryStats[tx.category]) categoryStats[tx.category] = 0;
@@ -139,6 +145,33 @@ async function generateExcelReport(userId) {
 
     sheet2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sheet2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF70AD47' } };
+
+    // Sheet 3: Tóm tắt tháng
+    const sheet3 = workbook.addWorksheet('Tóm tắt');
+    const now = new Date();
+    const thisMonth = transactions.filter(t => {
+      const txDate = new Date(t.createdAt);
+      return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+    });
+
+    const thisMonthTotal = thisMonth.reduce((sum, t) => sum + t.amount, 0);
+    const avgDaily = thisMonthTotal / Math.max(1, thisMonth.length);
+
+    sheet3.columns = [
+      { header: 'Chỉ số', key: 'metric', width: 25 },
+      { header: 'Giá trị', key: 'value', width: 25 }
+    ];
+
+    sheet3.addRows([
+      { metric: '📊 Tổng chi tháng này', value: thisMonthTotal.toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '📝 Số giao dịch tháng này', value: thisMonth.length },
+      { metric: '📈 Trung bình/ngày', value: avgDaily.toFixed(0).toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '💰 Tổng chi toàn thời gian', value: totalAmount.toLocaleString('vi-VN') + ' VNĐ' },
+      { metric: '📌 Danh mục nhiều nhất', value: Object.keys(categoryStats).length > 0 ? Object.keys(categoryStats).reduce((a, b) => categoryStats[a] > categoryStats[b] ? a : b) : 'Chưa có' }
+    ]);
+
+    sheet3.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC65911' } };
 
     const exportDir = path.join(__dirname, 'exports');
     if (!fs.existsSync(exportDir)) {
@@ -200,7 +233,7 @@ bot.start((ctx) => {
   ctx.reply(
     '🤖 **Chào bạn!** Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n' +
     '📌 **HƯỚNG DẪN SỬ DỤNG:**\n' +
-    '• Ghi nhanh: `ăn sáng 35k` hoặc `ăn trưa 30000`\n' +
+    '• Ghi nhanh: `ăn sáng 35k`, `ăn trưa 30k` hoặc `ăn tối 28000`\n' +
     '• Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n' +
     '• 💰 Đặt ngân sách: `/ngansach ăn sáng 500k`\n' +
     '• 📊 Xem thống kê: `/thongke`\n' +
@@ -336,14 +369,15 @@ bot.hears(/^hẹn\s+(.+?)\s+([\d.,]+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, asy
   }
 });
 
-// Ghi nhận giao dịch nhanh (Đã tối ưu chuẩn xác số tiền)
+// Ghi nhận giao dịch nhanh (Tách riêng biệt Category và RawAmount)
 bot.hears(/^(.+?)\s+([\d.,]+[k|tr]?)$/i, async (ctx) => {
   const text = ctx.message.text;
   if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
 
   try {
     const category = ctx.match[1].trim();
-    const amount = parseAmount(ctx.match[2]);
+    const rawMatch = ctx.match[2]; // CHỈ LẤY PHẦN SỐ TIỀN VÍ DỤ "30k" HOẶC "28000"
+    const amount = parseAmount(rawMatch);
 
     if (amount <= 0) return ctx.reply('❌ Số tiền không hợp lệ.');
 
@@ -366,6 +400,7 @@ bot.hears(/^(.+?)\s+([\d.,]+[k|tr]?)$/i, async (ctx) => {
       }
     );
   } catch (err) {
+    console.error('Lỗi ghi giao dịch:', err);
     ctx.reply('❌ Không thể ghi nhận giao dịch.');
   }
 });

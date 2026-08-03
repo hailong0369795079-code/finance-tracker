@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quản Lý Chi Tiêu & Nhắc Hẹn</title>
+  
+  <!-- Thêm thư viện vẽ Biểu đồ và tính Lịch Âm -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lunar-javascript/lunar.js"></script>
+
   <style>
     :root {
       --bg-main: #131722;
@@ -14,19 +19,31 @@
       --c-chi: #ef5350;
       --c-thu: #26a69a;
       --c-dautu: #2962ff;
+      --c-warn: #f39c12;
     }
     
     * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg-main); color: var(--text-main); margin: 0; padding: 20px; }
     
     .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-    .card { background: var(--bg-card); border-radius: 8px; padding: 20px; border: 1px solid var(--border); }
+    .card { background: var(--bg-card); border-radius: 8px; padding: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     
     .top-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media(max-width: 768px) { .top-section { grid-template-columns: 1fr; } }
 
     h2, h3 { margin-top: 0; color: #fff; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
+    /* ====== WIDGET ĐỒNG HỒ & LỊCH ====== */
+    .header-top { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
+    .header-title h1 { margin: 0 0 5px 0; color: #fff; font-size: 1.8rem; }
+    .header-total { font-size: 1.1rem; color: var(--text-muted); }
+    
+    .datetime-widget { text-align: right; background: var(--bg-card); padding: 10px 20px; border-radius: 8px; border: 1px solid var(--border); }
+    .time-display { font-size: 2rem; font-weight: bold; color: #fff; letter-spacing: 2px; font-family: monospace; margin-bottom: 5px; }
+    .date-display { font-size: 0.95rem; color: var(--text-muted); }
+    .lunar-display { color: var(--c-warn); font-weight: bold; }
+
+    /* Forms */
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; margin-bottom: 5px; color: var(--text-muted); font-size: 0.9rem; }
     .form-control { width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 6px; }
@@ -42,13 +59,19 @@
     .calendar-date.today { border-color: var(--c-dautu); font-weight: bold; color: #fff; }
     .has-reminder::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; background: var(--c-chi); border-radius: 50%; }
 
-    /* Nhắc hẹn */
-    .reminder-list { margin-top: 15px; max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-    .reminder-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-main); padding: 8px 12px; border-radius: 6px; border-left: 4px solid var(--c-chi); font-size: 0.9rem; }
-    .btn-pay { background: var(--c-thu); color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    /* Nhắc hẹn (Mới) */
+    .reminder-list { margin-top: 15px; max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+    .reminder-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-main); padding: 12px 15px; border-radius: 8px; border-left: 4px solid var(--c-warn); border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 0.95rem; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    .reminder-info strong { font-size: 1.05rem; color: #ffffff; }
+    .reminder-actions { display: flex; align-items: center; gap: 8px; }
+    .btn-confirm-pay { background: #27ae60; color: #fff; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: bold; transition: opacity 0.2s; }
+    .btn-confirm-pay:hover { opacity: 0.8; }
+    .btn-delete-rem { background: none; border: none; color: var(--c-chi); cursor: pointer; font-size: 1.1rem; font-weight: bold; padding: 5px; }
+    .btn-delete-rem:hover { color: #ff7961; }
+
     .reminder-form { display: flex; gap: 8px; margin-top: 15px; }
-    .reminder-form input { flex: 1; padding: 6px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 4px; font-size: 0.85rem; }
-    .reminder-form button { background: var(--c-dautu); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+    .reminder-form input { flex: 1; padding: 8px; background: var(--bg-main); border: 1px solid var(--border); color: #fff; border-radius: 6px; font-size: 0.85rem; }
+    .reminder-form button { background: var(--c-dautu); color: #fff; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; }
 
     /* Bảng giao dịch */
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -59,39 +82,59 @@
 <body>
 
   <div class="container">
-    <header style="display: flex; justify-content: space-between; align-items: center;">
-      <h1>📊 Quản Lý Chi Tiêu & Nhắc Hẹn</h1>
-      <div>Tổng chi: <span id="total-spent" style="color: var(--c-chi); font-size: 1.2rem; font-weight: bold;">0 VNĐ</span></div>
+    <!-- HEADER MỚI: Tích hợp Widget thời gian -->
+    <header class="header-top">
+      <div class="header-title">
+        <h1>📊 Bảng Điều Khiển Tài Chính</h1>
+        <div class="header-total">Tổng chi: <span id="total-spent" style="color: var(--c-chi); font-size: 1.3rem; font-weight: bold;">0 VNĐ</span></div>
+      </div>
+      <div class="datetime-widget">
+        <div class="time-display" id="clock-display">00:00:00</div>
+        <div class="date-display">
+          <span id="solar-display">Đang tải...</span> | 
+          <span class="lunar-display" id="lunar-display"></span>
+        </div>
+      </div>
     </header>
 
     <div class="top-section">
-      <div class="card">
-        <h3>➕ Thêm Giao Dịch Mới</h3>
-        <form id="addForm">
-          <div class="form-group">
-            <label>Số tiền (VNĐ)</label>
-            <input type="number" id="f_amount" class="form-control" required placeholder="VD: 500000">
-          </div>
-          <div class="form-group">
-            <label>Loại</label>
-            <select id="f_type" class="form-control">
-              <option value="CHI">Chi tiêu</option>
-              <option value="THU">Thu nhập</option>
-              <option value="DAUTU">Đầu tư</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Danh mục</label>
-            <input type="text" id="f_category" class="form-control" required placeholder="VD: Tiền nhà, Điện, Nước...">
-          </div>
-          <div class="form-group">
-            <label>Ghi chú</label>
-            <input type="text" id="f_note" class="form-control" placeholder="Ghi chú chi tiết...">
-          </div>
-          <button type="submit" class="btn">Thêm Giao Dịch</button>
-        </form>
+      <!-- Cột Trái -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div class="card">
+          <h3>➕ Thêm Giao Dịch Mới</h3>
+          <form id="addForm">
+            <div class="form-group">
+              <label>Số tiền (VNĐ)</label>
+              <input type="number" id="f_amount" class="form-control" required placeholder="VD: 500000">
+            </div>
+            <div class="form-group">
+              <label>Loại</label>
+              <select id="f_type" class="form-control">
+                <option value="CHI">Chi tiêu</option>
+                <option value="THU">Thu nhập</option>
+                <option value="DAUTU">Đầu tư</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Danh mục</label>
+              <input type="text" id="f_category" class="form-control" required placeholder="VD: Tiền nhà, Điện, Nước...">
+            </div>
+            <div class="form-group">
+              <label>Ghi chú</label>
+              <input type="text" id="f_note" class="form-control" placeholder="Ghi chú chi tiết...">
+            </div>
+            <button type="submit" class="btn">Thêm Giao Dịch</button>
+          </form>
+        </div>
+
+        <!-- BIỂU ĐỒ TÀI CHÍNH (MỚI) -->
+        <div class="card">
+          <h3>📈 Biểu Đồ Thu Chi (7 Ngày Gần Nhất)</h3>
+          <canvas id="financeChart" height="120"></canvas>
+        </div>
       </div>
 
+      <!-- Cột Phải -->
       <div class="card">
         <div class="calendar-header">
           <button onclick="changeMonth(-1)">◀</button>
@@ -109,7 +152,7 @@
           <div class="calendar-day-name">CN</div>
         </div>
 
-        <h3 style="margin-top: 15px; font-size: 1rem;">🔔 Danh Sách Nhắc Hẹn</h3>
+        <h3 style="margin-top: 25px; font-size: 1rem;">🔔 Danh Sách Nhắc Hẹn</h3>
         <div class="reminder-list" id="reminder-list"></div>
         
         <form id="reminderForm" class="reminder-form">
@@ -121,8 +164,9 @@
       </div>
     </div>
 
+    <!-- Bảng Giao Dịch -->
     <div class="card">
-      <h3>📜 Nhật Ký Giao Dịch</h3>
+      <h3>📜 Nhật Ký Giao Dịch Gần Đây</h3>
       <table>
         <thead>
           <tr>

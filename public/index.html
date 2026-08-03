@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quản Lý Chi Tiêu & Nhắc Hẹn</title>
   
-  <!-- Thêm thư viện vẽ Biểu đồ và tính Lịch Âm -->
+  <!-- Thư viện vẽ Biểu đồ và tính Lịch Âm -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://unpkg.com/lunar-javascript/lunar.js"></script>
 
@@ -29,7 +29,11 @@
     .card { background: var(--bg-card); border-radius: 8px; padding: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     
     .top-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    @media(max-width: 768px) { .top-section { grid-template-columns: 1fr; } }
+    @media(max-width: 768px) { 
+      .top-section { grid-template-columns: 1fr; }
+      .header-top { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .datetime-widget { text-align: left; width: 100%; }
+    }
 
     h2, h3 { margin-top: 0; color: #fff; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
@@ -59,7 +63,7 @@
     .calendar-date.today { border-color: var(--c-dautu); font-weight: bold; color: #fff; }
     .has-reminder::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; background: var(--c-chi); border-radius: 50%; }
 
-    /* Nhắc hẹn (Mới) */
+    /* Nhắc hẹn */
     .reminder-list { margin-top: 15px; max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
     .reminder-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg-main); padding: 12px 15px; border-radius: 8px; border-left: 4px solid var(--c-warn); border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 0.95rem; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .reminder-info strong { font-size: 1.05rem; color: #ffffff; }
@@ -82,7 +86,7 @@
 <body>
 
   <div class="container">
-    <!-- HEADER MỚI: Tích hợp Widget thời gian -->
+    <!-- HEADER: Tích hợp Widget thời gian & Tổng chi -->
     <header class="header-top">
       <div class="header-title">
         <h1>📊 Bảng Điều Khiển Tài Chính</h1>
@@ -127,12 +131,12 @@
           </form>
         </div>
 
-        <!-- BIỂU ĐỒ TÀI CHÍNH (MỚI) -->
+        <!-- BIỂU ĐỒ TÀI CHÍNH -->
         <div class="card">
           <h3>📈 Biểu Đồ Thu Chi (7 Ngày Gần Nhất)</h3>
-         <div style="position: relative; height: 250px; width: 100%;">
-  <canvas id="financeChart"></canvas>
-</div>
+          <div style="position: relative; height: 250px; width: 100%;">
+            <canvas id="financeChart"></canvas>
+          </div>
         </div>
       </div>
 

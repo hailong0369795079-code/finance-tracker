@@ -4,7 +4,7 @@ let allReminders = [];
 let currentDate = new Date();
 let financeChartInstance = null; // Biến lưu trữ biểu đồ
 
-// ==================== TÍNH NĂNG MỚI: ĐỒNG HỒ & LỊCH ÂM ====================
+// ==================== 1. TÍNH NĂNG ĐỒNG HỒ & LỊCH ÂM ====================
 function startLiveClock() {
   const clockEl = document.getElementById('clock-display');
   const solarEl = document.getElementById('solar-display');
@@ -13,53 +13,63 @@ function startLiveClock() {
 
   function updateTime() {
     const now = new Date();
-    // Đồng hồ
-    clockEl.innerText = now.toLocaleTimeString('vi-VN', { hour12: false });
+    if (clockEl) clockEl.innerText = now.toLocaleTimeString('vi-VN', { hour12: false });
     
-    // Nếu là giây số 0 hoặc chưa có ngày thì cập nhật lịch
-    if (now.getSeconds() === 0 || solarEl.innerText === 'Đang tải...') {
+    if (solarEl && (now.getSeconds() === 0 || solarEl.innerText === 'Đang tải...')) {
       solarEl.innerText = `${days[now.getDay()]}, ${now.toLocaleDateString('vi-VN')}`;
       
       try {
-        // Dùng thư viện lunar-javascript
-        const lunar = Lunar.fromDate(now);
-        lunarEl.innerText = `Âm Lịch: ${lunar.getDay()}/${lunar.getMonth()} (${lunar.getYearInGanZhi()})`;
+        if (typeof Lunar !== 'undefined') {
+          const lunar = Lunar.fromDate(now);
+          if (lunarEl) lunarEl.innerText = `Âm Lịch: ${lunar.getDay()}/${lunar.getMonth()} (${lunar.getYearInGanZhi()})`;
+        }
       } catch (e) {
-        lunarEl.innerText = '';
+        if (lunarEl) lunarEl.innerText = '';
       }
     }
   }
-  updateTime(); // Chạy ngay lần đầu
-  setInterval(updateTime, 1000); // Lặp lại mỗi 1 giây
+  updateTime();
+  setInterval(updateTime, 1000);
 }
 
-// ==================== HÀM VẼ BIỂU ĐỒ (ĐÃ FIX HIỂN THỊ) ====================
-function updateFinanceChart(transactions) {
+// ==================== 2. HÀM VẼ BIỂU ĐỒ (HIỆN THEO TỪNG NGÀY) ====================
+function updateFinanceChart(transactions = []) {
   const canvas = document.getElementById('financeChart');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  
+
   const last7Days = [];
   const chiData = [0, 0, 0, 0, 0, 0, 0];
   const thuData = [0, 0, 0, 0, 0, 0, 0];
 
-  // Lấy 7 ngày gần nhất
+  // Tạo mốc 7 ngày gần nhất
+  const today = new Date();
   for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    last7Days.push(`${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`);
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const dayStr = String(d.getDate()).padStart(2, '0');
+    const monthStr = String(d.getMonth() + 1).padStart(2, '0');
+    last7Days.push(`${dayStr}/${monthStr}`);
   }
 
-  // Phân loại data
+  // Phân loại dữ liệu theo từng ngày
   transactions.forEach(tx => {
     if (!tx.createdAt) return;
-    const txDate = new Date(tx.createdAt);
-    const dateStr = `${String(txDate.getDate()).padStart(2, '0')}/${String(txDate.getMonth() + 1).padStart(2, '0')}`;
-    const index = last7Days.indexOf(dateStr);
     
+    const txDate = new Date(tx.createdAt);
+    if (isNaN(txDate.getTime())) return;
+
+    const dayStr = String(txDate.getDate()).padStart(2, '0');
+    const monthStr = String(txDate.getMonth() + 1).padStart(2, '0');
+    const dateStr = `${dayStr}/${monthStr}`;
+
+    const index = last7Days.indexOf(dateStr);
     if (index !== -1) {
-      if (tx.type === 'CHI') chiData[index] += tx.amount;
-      else if (tx.type === 'THU') thuData[index] += tx.amount;
+      const amount = Number(tx.amount) || 0;
+      if (tx.type === 'CHI' || tx.type === 'DAUTU') {
+        chiData[index] += amount;
+      } else if (tx.type === 'THU') {
+        thuData[index] += amount;
+      }
     }
   });
 
@@ -75,17 +85,51 @@ function updateFinanceChart(transactions) {
         data: {
           labels: last7Days,
           datasets: [
-            { label: 'Chi Tiêu (VNĐ)', data: chiData, borderColor: '#ef5350', backgroundColor: 'rgba(239, 83, 80, 0.1)', borderWidth: 2, tension: 0.3, fill: true },
-            { label: 'Thu Nhập (VNĐ)', data: thuData, borderColor: '#26a69a', backgroundColor: 'rgba(38, 166, 154, 0.1)', borderWidth: 2, tension: 0.3, fill: true }
+            {
+              label: 'Chi Tiêu (VNĐ)',
+              data: chiData,
+              borderColor: '#ef5350',
+              backgroundColor: 'rgba(239, 83, 80, 0.15)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true,
+              pointRadius: 5, // Điểm mút rõ ràng
+              pointHoverRadius: 7
+            },
+            {
+              label: 'Thu Nhập (VNĐ)',
+              data: thuData,
+              borderColor: '#26a69a',
+              backgroundColor: 'rgba(38, 166, 154, 0.15)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true,
+              pointRadius: 5,
+              pointHoverRadius: 7
+            }
           ]
         },
         options: {
           responsive: true,
-          maintainAspectRatio: false, // 🔥 FIX LỖI TÀNG HÌNH BIỂU ĐỒ
-          plugins: { legend: { labels: { color: '#d1d4dc' } } },
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#d1d4dc' } },
+            tooltip: {
+              callbacks: {
+                label: (context) => `${context.dataset.label}: ${context.raw.toLocaleString('vi-VN')} VNĐ`
+              }
+            }
+          },
           scales: {
             x: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' } },
-            y: { ticks: { color: '#787b86' }, grid: { color: '#2a2e39' }, beginAtZero: true }
+            y: { 
+              ticks: { 
+                color: '#787b86',
+                callback: (val) => val.toLocaleString('vi-VN')
+              }, 
+              grid: { color: '#2a2e39' }, 
+              beginAtZero: true 
+            }
           }
         }
       });
@@ -95,63 +139,144 @@ function updateFinanceChart(transactions) {
   }
 }
 
-// ==================== CÁC HÀM XỬ LÝ NÚT BẤM (ĐÃ FIX LỖI KHÔNG XÓA ĐƯỢC) ====================
+// ==================== 3. CÁC HÀM TÍNH TOÁN & HIỂN THỊ DỮ LIỆU ====================
 
-async function deleteReminder(id) {
-  if (confirm('Xóa lịch hẹn này?')) {
+function renderTransactions(transactions = []) {
+  const list = document.getElementById('transaction-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  let totalChi = 0;
+
+  transactions.forEach(tx => {
+    const amount = Number(tx.amount) || 0;
+
+    if (tx.type === 'CHI' || tx.type === 'DAUTU') {
+      totalChi += amount;
+    }
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${new Date(tx.createdAt).toLocaleString('vi-VN')}</td>
+      <td><strong>${tx.category}</strong> <span style="font-size:0.75rem; background:var(--border); padding:2px 6px; border-radius:4px;">${tx.source || 'WEB'}</span></td>
+      <td>${tx.note || ''}</td>
+      <td style="color: ${tx.type === 'CHI' ? 'var(--c-chi)' : tx.type === 'THU' ? 'var(--c-thu)' : 'var(--c-dautu)'}; font-weight: bold;">
+        ${tx.type === 'THU' ? '+' : '-'}${amount.toLocaleString('vi-VN')} VNĐ
+      </td>
+      <td><button onclick="deleteTx('${tx._id}')" style="background:none; border:none; color:var(--c-chi); cursor:pointer;">Xóa</button></td>
+    `;
+    list.appendChild(row);
+  });
+
+  // Hiển thị Tổng Tiền Tiêu
+  const totalSpentEl = document.getElementById('total-spent');
+  if (totalSpentEl) {
+    totalSpentEl.innerText = `${totalChi.toLocaleString('vi-VN')} VNĐ`;
+  }
+
+  // Cập nhật biểu đồ ngay lập tức
+  updateFinanceChart(transactions);
+}
+
+function renderReminders(reminders = []) {
+  const list = document.getElementById('reminder-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const pendingReminders = reminders.filter(r => !r.isPaid);
+
+  if (pendingReminders.length === 0) {
+    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 15px;">Không có lịch hẹn sắp tới 🎉</div>';
+    return;
+  }
+
+  pendingReminders.forEach(rem => {
+    const dueDateStr = new Date(rem.dueDate).toLocaleDateString('vi-VN');
+    const item = document.createElement('div');
+    item.className = 'reminder-item';
+    
+    item.innerHTML = `
+      <div class="reminder-info">
+        <strong>${rem.title}</strong><br>
+        <small style="color: var(--text-muted);">📅 Hạn: ${dueDateStr} &nbsp;|&nbsp; <b style="color: #fff;">${Number(rem.amount).toLocaleString('vi-VN')} VNĐ</b></small>
+      </div>
+      <div class="reminder-actions">
+        <button class="btn-confirm-pay">✅ Xác nhận</button>
+        <button class="btn-delete-rem">✕</button>
+      </div>
+    `;
+
+    // Sự kiện nút bấm an toàn
+    item.querySelector('.btn-confirm-pay').onclick = () => payReminder(rem._id, rem.title, rem.amount);
+    item.querySelector('.btn-delete-rem').onclick = () => deleteReminder(rem._id);
+
+    list.appendChild(item);
+  });
+}
+
+// ==================== 4. THAO TÁC API / OFFLINE (KHÔNG TRÙNG HÀM) ====================
+
+async function deleteTx(id) {
+  if (confirm('Xóa giao dịch này?')) {
     try {
-      const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('API chưa sẵn sàng'); // Ép văng lỗi để chạy Catch bên dưới
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('API thất bại');
       fetchData();
     } catch (err) {
-      // 🔥 Xóa mạnh ở LocalStorage nếu API bị lỗi
-      allReminders = allReminders.filter(r => String(r._id) !== String(id));
-      renderReminders(allReminders);
+      allTransactions = allTransactions.filter(t => String(t._id) !== String(id));
+      renderTransactions(allTransactions);
       saveToLocalStorage();
     }
   }
 }
 
 async function payReminder(id, title, amount) {
-  if (confirm(`Bạn xác nhận đã thanh toán: ${title} (${amount.toLocaleString('vi-VN')} VNĐ)?\n\nHệ thống sẽ tự động trừ vào chi tiêu thực tế.`)) {
+  if (confirm(`Bạn xác nhận đã thanh toán: ${title} (${Number(amount).toLocaleString('vi-VN')} VNĐ)?\n\nHệ thống sẽ tự động trừ vào chi tiêu thực tế.`)) {
     try {
       const res = await fetch(`/api/reminders/${id}/pay`, { method: 'POST' });
-      if (!res.ok) throw new Error('API chưa sẵn sàng');
+      if (!res.ok) throw new Error('API thất bại');
       fetchData();
       alert(`✅ Đã ghi nhận chi tiêu: ${title}`);
     } catch (err) {
-      // 🔥 Xử lý mạnh ở Local nếu API bị lỗi
       allReminders = allReminders.map(r => String(r._id) === String(id) ? { ...r, isPaid: true } : r);
       
       const newLocalTx = {
         _id: Date.now().toString(),
-        telegramUserId: 0, amount: amount, type: 'CHI', category: title,
-        note: 'Thanh toán từ lịch hẹn', source: 'WEB', createdAt: new Date()
+        telegramUserId: 0,
+        amount: Number(amount),
+        type: 'CHI',
+        category: title,
+        note: 'Thanh toán từ lịch hẹn',
+        source: 'WEB',
+        createdAt: new Date().toISOString()
       };
       allTransactions.unshift(newLocalTx);
       
-      renderTransactions(allTransactions); // Hàm này sẽ gọi updateFinanceChart luôn
+      renderTransactions(allTransactions);
       renderReminders(allReminders);
+      renderCalendar();
+      saveToLocalStorage();
+      alert(`⚠️ Đã ghi nhận (Offline): ${title}`);
+    }
+  }
+}
+
+async function deleteReminder(id) {
+  if (confirm('Xóa lịch hẹn này?')) {
+    try {
+      const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('API thất bại');
+      fetchData();
+    } catch (err) {
+      allReminders = allReminders.filter(r => String(r._id) !== String(id));
+      renderReminders(allReminders);
+      renderCalendar();
       saveToLocalStorage();
     }
   }
 }
 
-async function deleteTx(id) {
-  if (confirm('Xóa giao dịch này?')) {
-    try {
-      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('API chưa sẵn sàng');
-      fetchData();
-    } catch (err) {
-      // 🔥 Xóa mạnh ở LocalStorage nếu API bị lỗi
-      allTransactions = allTransactions.filter(t => String(t._id) !== String(id));
-      renderTransactions(allTransactions); // Cập nhật lại list và biểu đồ
-      saveToLocalStorage();
-    }
-  }
-}
-// ==================== LOCALSTORAGE FUNCTIONS ====================
+// ==================== 5. LOCALSTORAGE & FETCH DATA ====================
 
 function saveToLocalStorage() {
   localStorage.setItem('transactions', JSON.stringify(allTransactions));
@@ -166,43 +291,28 @@ function loadFromLocalStorage() {
     if (savedTx) allTransactions = JSON.parse(savedTx);
     if (savedRem) allReminders = JSON.parse(savedRem);
     
-    if (savedTx || savedRem) {
-      return true;
-    }
+    return Boolean(savedTx || savedRem);
   } catch (err) {
     console.error('Lỗi load localStorage:', err);
+    return false;
   }
-  return false;
 }
-
-// ==================== FETCH DATA ====================
-
-document.addEventListener('DOMContentLoaded', () => {
-  // Kích hoạt đồng hồ ngay khi load trang
-  startLiveClock(); 
-  
-  const hasLocalData = loadFromLocalStorage();
-  fetchData();
-  setInterval(saveToLocalStorage, 5000);
-  setInterval(() => { fetchData(); }, 10000);
-});
 
 async function fetchData() {
   try {
     const resTx = await fetch('/api/transactions');
     if (!resTx.ok) throw new Error('API transactions failed');
     allTransactions = await resTx.json();
-    renderTransactions(allTransactions);
-    saveToLocalStorage();
 
     const resRem = await fetch('/api/reminders');
     if (!resRem.ok) throw new Error('API reminders failed');
     allReminders = await resRem.json();
+
+    renderTransactions(allTransactions);
     renderReminders(allReminders);
     renderCalendar();
     saveToLocalStorage();
   } catch (err) {
-    console.error("Lỗi tải dữ liệu từ API:", err);
     if (allTransactions.length > 0 || allReminders.length > 0) {
       renderTransactions(allTransactions);
       renderReminders(allReminders);
@@ -210,15 +320,15 @@ async function fetchData() {
       return;
     }
     
-    // Demo data nếu không có gì
+    // Mẫu Dữ Liệu Ban Đầu Khi Chưa Có Gì
     allTransactions = [
-      { _id: '1', telegramUserId: 0, amount: 35000, type: 'CHI', category: 'Ăn sáng', note: 'Cơm gà', source: 'BOT', createdAt: new Date() },
-      { _id: '2', telegramUserId: 0, amount: 150000, type: 'THU', category: 'Bán đồ', note: 'Áo cũ', source: 'WEB', createdAt: new Date(Date.now() - 86400000) },
-      { _id: '3', telegramUserId: 0, amount: 500000, type: 'CHI', category: 'Tiền nhà', note: 'Tháng 8', source: 'WEB', createdAt: new Date(Date.now() - 86400000 * 2) }
+      { _id: '1', telegramUserId: 0, amount: 35000, type: 'CHI', category: 'Ăn sáng', note: 'Cơm gà', source: 'BOT', createdAt: new Date().toISOString() },
+      { _id: '2', telegramUserId: 0, amount: 150000, type: 'THU', category: 'Bán đồ', note: 'Áo cũ', source: 'WEB', createdAt: new Date(Date.now() - 86400000).toISOString() },
+      { _id: '3', telegramUserId: 0, amount: 500000, type: 'CHI', category: 'Tiền nhà', note: 'Tháng 8', source: 'WEB', createdAt: new Date(Date.now() - 86400000 * 2).toISOString() }
     ];
     
     allReminders = [
-      { _id: '1', title: 'Tiền điện', amount: 200000, dueDate: new Date(Date.now() + 86400000 * 3), isPaid: false }
+      { _id: '1', title: 'Tiền điện', amount: 200000, dueDate: new Date(Date.now() + 86400000 * 3).toISOString(), isPaid: false }
     ];
     
     renderTransactions(allTransactions);
@@ -227,101 +337,7 @@ async function fetchData() {
   }
 }
 
-function renderTransactions(transactions) {
-  const list = document.getElementById('transaction-list');
-  list.innerHTML = '';
-
-  let totalChi = 0;
-  transactions.forEach(tx => {
-    if (tx.type === 'CHI') totalChi += tx.amount;
-    
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${new Date(tx.createdAt).toLocaleString('vi-VN')}</td>
-      <td><strong>${tx.category}</strong> <span style="font-size:0.75rem; background:var(--border); padding:2px 6px; border-radius:4px;">${tx.source || 'WEB'}</span></td>
-      <td>${tx.note || ''}</td>
-      <td style="color: ${tx.type === 'CHI' ? 'var(--c-chi)' : 'var(--c-thu)'}; font-weight: bold;">
-        ${tx.type === 'CHI' ? '-' : '+'}${tx.amount.toLocaleString('vi-VN')} VNĐ
-      </td>
-      <td><button onclick="deleteTx('${tx._id}')" style="background:none; border:none; color:var(--c-chi); cursor:pointer;">Xóa</button></td>
-    `;
-    list.appendChild(row);
-  });
-
-  document.getElementById('total-spent').innerText = `${totalChi.toLocaleString('vi-VN')} VNĐ`;
-  
-  // 🔥 Gọi hàm update biểu đồ ngay khi render giao dịch
-  updateFinanceChart(transactions); 
-}
-
-function renderReminders(reminders) {
-  const list = document.getElementById('reminder-list');
-  list.innerHTML = '';
-
-  const pendingReminders = reminders.filter(r => !r.isPaid);
-
-  if (pendingReminders.length === 0) {
-    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 15px;">Không có lịch hẹn sắp tới 🎉</div>';
-    return;
-  }
-
-  pendingReminders.forEach(rem => {
-    const dueDateStr = new Date(rem.dueDate).toLocaleDateString('vi-VN');
-    const item = document.createElement('div');
-    item.className = 'reminder-item';
-    const safeTitle = rem.title.replace(/'/g, "\\'"); 
-    
-    item.innerHTML = `
-      <div class="reminder-info">
-        <strong>${rem.title}</strong><br>
-        <small style="color: var(--text-muted);">📅 Hạn: ${dueDateStr} &nbsp;|&nbsp; <b style="color: #fff;">${rem.amount.toLocaleString('vi-VN')} VNĐ</b></small>
-      </div>
-      <div class="reminder-actions">
-        <button class="btn-confirm-pay" onclick="payReminder('${rem._id}', '${safeTitle}', ${rem.amount})">✅ Xác nhận</button>
-        <button onclick="deleteReminder('${rem._id}')" class="btn-delete-rem">✕</button>
-      </div>
-    `;
-    list.appendChild(item);
-  });
-}
-
-async function payReminder(id, title, amount) {
-  if (confirm(`Bạn xác nhận đã thanh toán: ${title} (${amount.toLocaleString('vi-VN')} VNĐ)?\n\nHệ thống sẽ tự động trừ vào chi tiêu thực tế.`)) {
-    try {
-      const res = await fetch(`/api/reminders/${id}/pay`, { method: 'POST' });
-      if (res.ok) {
-        fetchData();
-        alert(`✅ Đã ghi nhận chi tiêu: ${title}`);
-      }
-    } catch (err) {
-      allReminders = allReminders.map(r => r._id === id ? { ...r, isPaid: true } : r);
-      
-      const newLocalTx = {
-        _id: Date.now().toString(),
-        telegramUserId: 0, amount: amount, type: 'CHI', category: title,
-        note: 'Thanh toán từ lịch hẹn', source: 'WEB', createdAt: new Date()
-      };
-      allTransactions.unshift(newLocalTx);
-      renderTransactions(allTransactions);
-      renderReminders(allReminders);
-      saveToLocalStorage();
-      alert(`⚠️ Đã ghi nhận (Offline): ${title}`);
-    }
-  }
-}
-
-async function deleteReminder(id) {
-  if (confirm('Xóa lịch hẹn này?')) {
-    try {
-      const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchData();
-    } catch (err) {
-      allReminders = allReminders.filter(r => r._id !== id);
-      renderReminders(allReminders);
-      saveToLocalStorage();
-    }
-  }
-}
+// ==================== 6. LỊCH (CALENDAR) ====================
 
 function changeMonth(direction) {
   currentDate.setMonth(currentDate.getMonth() + direction);
@@ -331,6 +347,7 @@ function changeMonth(direction) {
 function renderCalendar() {
   const grid = document.getElementById('calendar-grid');
   const monthYearLabel = document.getElementById('calendar-month-year');
+  if (!grid || !monthYearLabel) return;
   
   while (grid.children.length > 7) { grid.removeChild(grid.lastChild); }
 
@@ -365,79 +382,84 @@ function renderCalendar() {
   }
 }
 
-document.getElementById('addForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const body = {
-    amount: parseFloat(document.getElementById('f_amount').value),
-    type: document.getElementById('f_type').value,
-    category: document.getElementById('f_category').value,
-    note: document.getElementById('f_note').value
-  };
+// ==================== 7. FORM SUBMITS & KHỞI TẠO ====================
+
+document.addEventListener('DOMContentLoaded', () => {
+  startLiveClock(); 
+  loadFromLocalStorage();
+  fetchData();
   
-  try {
-    const res = await fetch('/api/transactions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  setInterval(saveToLocalStorage, 5000);
+  setInterval(fetchData, 10000);
+
+  // Submit Giao dịch
+  const addForm = document.getElementById('addForm');
+  if (addForm) {
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        amount: parseFloat(document.getElementById('f_amount').value),
+        type: document.getElementById('f_type').value,
+        category: document.getElementById('f_category').value,
+        note: document.getElementById('f_note').value
+      };
+      
+      try {
+        const res = await fetch('/api/transactions', {
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(body)
+        });
+        if (res.ok) {
+          const newTx = await res.json();
+          allTransactions.unshift(newTx);
+        } else throw new Error('API Lỗi');
+      } catch (err) {
+        const newTx = { _id: Date.now().toString(), ...body, source: 'LOCAL', createdAt: new Date().toISOString() };
+        allTransactions.unshift(newTx);
+      } finally {
+        addForm.reset();
+        renderTransactions(allTransactions);
+        saveToLocalStorage();
+      }
     });
-    if (res.ok) {
-      const newTx = await res.json();
-      allTransactions.unshift(newTx);
-      document.getElementById('addForm').reset();
-      renderTransactions(allTransactions);
-      saveToLocalStorage();
-    }
-  } catch (err) {
-    const newTx = { _id: Date.now().toString(), ...body, source: 'LOCAL', createdAt: new Date() };
-    allTransactions.unshift(newTx);
-    document.getElementById('addForm').reset();
-    renderTransactions(allTransactions);
-    saveToLocalStorage();
+  }
+
+  // Submit Nhắc hẹn
+  const reminderForm = document.getElementById('reminderForm');
+  if (reminderForm) {
+    reminderForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        title: document.getElementById('r_title').value,
+        amount: parseFloat(document.getElementById('r_amount').value),
+        dueDate: document.getElementById('r_date').value
+      };
+
+      try {
+        const res = await fetch('/api/reminders', {
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(body)
+        });
+        if (res.ok) {
+          const newRem = await res.json();
+          allReminders.unshift(newRem);
+        } else throw new Error('API Lỗi');
+      } catch (err) {
+        const newRem = { _id: Date.now().toString(), ...body, isPaid: false };
+        allReminders.unshift(newRem);
+      } finally {
+        reminderForm.reset();
+        renderReminders(allReminders);
+        renderCalendar();
+        saveToLocalStorage();
+      }
+    });
   }
 });
 
-document.getElementById('reminderForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const body = {
-    title: document.getElementById('r_title').value,
-    amount: parseFloat(document.getElementById('r_amount').value),
-    dueDate: document.getElementById('r_date').value
-  };
-
-  try {
-    const res = await fetch('/api/reminders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-    if (res.ok) {
-      const newRem = await res.json();
-      allReminders.unshift(newRem);
-      document.getElementById('reminderForm').reset();
-      renderReminders(allReminders);
-      renderCalendar();
-      saveToLocalStorage();
-    }
-  } catch (err) {
-    const newRem = { _id: Date.now().toString(), ...body, isPaid: false };
-    allReminders.unshift(newRem);
-    document.getElementById('reminderForm').reset();
-    renderReminders(allReminders);
-    renderCalendar();
-    saveToLocalStorage();
-  }
-});
-
-async function deleteTx(id) {
-  if (confirm('Xóa giao dịch này?')) {
-    try {
-      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchData();
-    } catch (err) {
-      allTransactions = allTransactions.filter(t => t._id !== id);
-      renderTransactions(allTransactions);
-      saveToLocalStorage();
-    }
-  }
-}
-
-// ==================== SOCKET LISTENERS ====================
+// ==================== 8. SOCKET LISTENERS ====================
 socket.on('connect', () => { fetchData(); });
 socket.on('new_transaction', () => { fetchData(); });
 socket.on('delete_transaction', () => { fetchData(); });

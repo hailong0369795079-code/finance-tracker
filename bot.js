@@ -36,26 +36,25 @@ const bot = new Telegraf(BOT_TOKEN);
 
 // ==================== HÀM XỬ LÝ SỐ TIỀN CHUẨN XÁC ====================
 function parseAmount(amountStr) {
-  let cleanStr = amountStr.toLowerCase().trim();
+  if (!amountStr) return 0;
+  let cleanStr = amountStr.toString().toLowerCase().trim();
   let multiplier = 1;
 
-  if (cleanStr.includes('tr')) {
+  if (cleanStr.endsWith('tr')) {
     multiplier = 1000000;
-    cleanStr = cleanStr.replace('tr', '');
-  } else if (cleanStr.includes('k')) {
+    cleanStr = cleanStr.slice(0, -2);
+  } else if (cleanStr.endsWith('k')) {
     multiplier = 1000;
-    cleanStr = cleanStr.replace('k', '');
+    cleanStr = cleanStr.slice(0, -1);
   }
 
-  // Xóa các dấu phẩy hoặc chấm phân cách cũ nếu có
-  cleanStr = cleanStr.replace(/[,.]/g, '');
+  cleanStr = cleanStr.replace(/[^0-9.,]/g, '').replace(',', '.');
   const num = parseFloat(cleanStr);
   
   return isNaN(num) ? 0 : num * multiplier;
 }
 
 // ==================== HÀM NGÂN SÁCH ====================
-
 function getCurrentMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -87,11 +86,9 @@ async function getBudgetSpent(userId, category, month) {
 }
 
 // ==================== THỐNG KÊ & XUẤT EXCEL ====================
-
 async function generateExcelReport(userId) {
   try {
     const transactions = await Transaction.find({ telegramUserId: userId }).sort({ createdAt: -1 });
-    
     if (transactions.length === 0) return null;
 
     const workbook = new ExcelJS.Workbook();
@@ -120,9 +117,7 @@ async function generateExcelReport(userId) {
 
     const categoryStats = {};
     transactions.forEach(tx => {
-      if (!categoryStats[tx.category]) {
-        categoryStats[tx.category] = 0;
-      }
+      if (!categoryStats[tx.category]) categoryStats[tx.category] = 0;
       categoryStats[tx.category] += tx.amount;
     });
 
@@ -138,46 +133,19 @@ async function generateExcelReport(userId) {
       sheet2.addRow({
         category: cat,
         total: amount.toLocaleString('vi-VN'),
-        percentage: ((amount / totalAmount) * 100).toFixed(1)
+        percentage: totalAmount > 0 ? ((amount / totalAmount) * 100).toFixed(1) : 0
       });
     });
 
     sheet2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sheet2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF70AD47' } };
 
-    const sheet3 = workbook.addWorksheet('Tóm tắt');
-    const now = new Date();
-    const thisMonth = transactions.filter(t => {
-      const txDate = new Date(t.createdAt);
-      return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
-    });
-
-    const thisMonthTotal = thisMonth.reduce((sum, t) => sum + t.amount, 0);
-    const avgDaily = thisMonthTotal / Math.max(1, thisMonth.length);
-
-    sheet3.columns = [
-      { header: 'Chỉ số', key: 'metric', width: 25 },
-      { header: 'Giá trị', key: 'value', width: 25 }
-    ];
-
-    sheet3.addRows([
-      { metric: '📊 Tổng chi tháng này', value: thisMonthTotal.toLocaleString('vi-VN') + ' VNĐ' },
-      { metric: '📝 Số giao dịch tháng này', value: thisMonth.length },
-      { metric: '📈 Trung bình/ngày', value: avgDaily.toFixed(0).toLocaleString('vi-VN') + ' VNĐ' },
-      { metric: '💰 Tổng chi toàn thời gian', value: totalAmount.toLocaleString('vi-VN') + ' VNĐ' },
-      { metric: '📌 Danh mục nhiều nhất', value: Object.keys(categoryStats).reduce((a, b) => categoryStats[a] > categoryStats[b] ? a : b, '') }
-    ]);
-
-    sheet3.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet3.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC65911' } };
-
-    const timestamp = new Date().toISOString().slice(0, 10);
-    const filename = `Bao_Cao_Tai_Chinh_${timestamp}.xlsx`;
     const exportDir = path.join(__dirname, 'exports');
     if (!fs.existsSync(exportDir)) {
       fs.mkdirSync(exportDir, { recursive: true });
     }
 
+    const filename = `Bao_Cao_Tai_Chinh_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const filepath = path.join(exportDir, filename);
     await workbook.xlsx.writeFile(filepath);
     return filepath;
@@ -216,7 +184,7 @@ async function getStatsSummary(userId) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .forEach(([cat, amount], idx) => {
-        const pct = ((amount / totalAmount) * 100).toFixed(1);
+        const pct = totalAmount > 0 ? ((amount / totalAmount) * 100).toFixed(1) : 0;
         report += `${idx + 1}. ${cat}: ${amount.toLocaleString('vi-VN')} VNĐ (${pct}%)\n`;
       });
 
@@ -232,7 +200,7 @@ bot.start((ctx) => {
   ctx.reply(
     '🤖 **Chào bạn!** Bot quản lý chi tiêu & Gemini AI đã sẵn sàng.\n\n' +
     '📌 **HƯỚNG DẪN SỬ DỤNG:**\n' +
-    '• Ghi nhanh: `ăn sáng 35k`, `ăn trưa 28000` hoặc `tiền nhà 3tr`\n' +
+    '• Ghi nhanh: `ăn sáng 35k` hoặc `ăn trưa 30000`\n' +
     '• Đặt lịch: `hẹn tiền điện 500k ngày 10/8`\n' +
     '• 💰 Đặt ngân sách: `/ngansach ăn sáng 500k`\n' +
     '• 📊 Xem thống kê: `/thongke`\n' +
@@ -308,7 +276,7 @@ bot.command('xemngansach', async (ctx) => {
       const spent = await getBudgetSpent(ctx.from.id, category, currentMonth);
       const limit = budgetDoc.budget_limit;
       const remaining = limit - spent;
-      const percentage = ((spent / limit) * 100).toFixed(1);
+      const percentage = limit > 0 ? ((spent / limit) * 100).toFixed(1) : 0;
 
       let status = '✅';
       if (percentage >= 100) status = '🔴';
@@ -368,7 +336,7 @@ bot.hears(/^hẹn\s+(.+?)\s+([\d.,]+[k|tr]?)\s+ngày\s+(\d{1,2}\/\d{1,2})/i, asy
   }
 });
 
-// Fix lỗi nhận diện số tiền (hỗ trợ cả 28k lẫn 28000)
+// Ghi nhận giao dịch nhanh (Đã tối ưu chuẩn xác số tiền)
 bot.hears(/^(.+?)\s+([\d.,]+[k|tr]?)$/i, async (ctx) => {
   const text = ctx.message.text;
   if (text.startsWith('/') || text.toLowerCase().startsWith('hẹn') || text.toLowerCase().startsWith('ai')) return;
@@ -377,7 +345,7 @@ bot.hears(/^(.+?)\s+([\d.,]+[k|tr]?)$/i, async (ctx) => {
     const category = ctx.match[1].trim();
     const amount = parseAmount(ctx.match[2]);
 
-    if (amount <= 0) return;
+    if (amount <= 0) return ctx.reply('❌ Số tiền không hợp lệ.');
 
     const tx = await Transaction.create({
       telegramUserId: ctx.from.id,

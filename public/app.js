@@ -32,7 +32,81 @@ function startLiveClock() {
   setInterval(updateTime, 1000);
 }
 
-// ==================== 2. HÀM VẼ BIỂU ĐỒ (HIỆN THEO TỪNG NGÀY) ====================
+// ==================== 2. TÍNH TOÁN BÁO CÁO THÁNG & CẢNH BÁO TÀI CHÍNH ====================
+function calculateMonthlyStats() {
+  const monthInput = document.getElementById('stats-month');
+  if (!monthInput || !monthInput.value) return;
+
+  const [yearStr, monthStr] = monthInput.value.split('-');
+  const selectedYear = parseInt(yearStr);
+  const selectedMonth = parseInt(monthStr) - 1; // 0-indexed trong JS
+
+  let totalThu = 0;
+  let totalChi = 0;
+
+  allTransactions.forEach(tx => {
+    if (!tx.createdAt) return;
+    const txDate = new Date(tx.createdAt);
+    if (isNaN(txDate.getTime())) return;
+
+    if (txDate.getFullYear() === selectedYear && txDate.getMonth() === selectedMonth) {
+      const amount = Number(tx.amount) || 0;
+      if (tx.type === 'THU') {
+        totalThu += amount;
+      } else if (tx.type === 'CHI' || tx.type === 'DAUTU') {
+        totalChi += amount;
+      }
+    }
+  });
+
+  const balance = totalThu - totalChi;
+
+  // Cập nhật DOM các chỉ số
+  document.getElementById('month-thu').innerText = `${totalThu.toLocaleString('vi-VN')} VNĐ`;
+  document.getElementById('month-chi').innerText = `${totalChi.toLocaleString('vi-VN')} VNĐ`;
+  
+  const balanceEl = document.getElementById('month-balance');
+  balanceEl.innerText = `${balance.toLocaleString('vi-VN')} VNĐ`;
+  balanceEl.style.color = balance >= 0 ? '#26a69a' : '#ef5350';
+
+  // LOGIC CẢNH BÁO TÀI CHÍNH TỰ ĐỘNG
+  const alertEl = document.getElementById('finance-alert');
+  if (!alertEl) return;
+
+  alertEl.style.display = 'block';
+
+  if (totalThu === 0 && totalChi > 0) {
+    // Trường hợp chưa có thu nhập nhưng đã chi
+    alertEl.style.background = 'rgba(239, 83, 80, 0.15)';
+    alertEl.style.color = '#ef5350';
+    alertEl.style.border = '1px solid #ef5350';
+    alertEl.innerHTML = `🔴 <b>CẢNH BÁO:</b> Tháng ${selectedMonth + 1}/${selectedYear} chưa ghi nhận thu nhập nhưng bạn đã chi <b>${totalChi.toLocaleString('vi-VN')} VNĐ</b>!`;
+  } else if (balance < 0) {
+    // Trường hợp Âm tiền / Bội chi
+    alertEl.style.background = 'rgba(239, 83, 80, 0.2)';
+    alertEl.style.color = '#ff5252';
+    alertEl.style.border = '1px solid #ff5252';
+    alertEl.innerHTML = `🚨 <b>BÁO ĐỘNG BỘI CHI:</b> Bạn đã tiêu vượt quá thu nhập <b>${Math.abs(balance).toLocaleString('vi-VN')} VNĐ</b> trong tháng ${selectedMonth + 1}!`;
+  } else if (totalThu > 0 && balance < totalThu * 0.2) {
+    // Trường hợp số dư còn dưới 20% thu nhập
+    const percentLeft = Math.round((balance / totalThu) * 100);
+    alertEl.style.background = 'rgba(243, 156, 18, 0.2)';
+    alertEl.style.color = '#f39c12';
+    alertEl.style.border = '1px solid #f39c12';
+    alertEl.innerHTML = `⚠️ <b>CẢNH BÁO CHI TIÊU QUÁ TAY:</b> Số dư tháng ${selectedMonth + 1} chỉ còn <b>${balance.toLocaleString('vi-VN')} VNĐ</b> (còn lại ${percentLeft}% thu nhập)!`;
+  } else if (totalThu > 0) {
+    // Trạng thái an toàn
+    const percentLeft = Math.round((balance / totalThu) * 100);
+    alertEl.style.background = 'rgba(38, 166, 154, 0.15)';
+    alertEl.style.color = '#26a69a';
+    alertEl.style.border = '1px solid #26a69a';
+    alertEl.innerHTML = `🟢 <b>TÀI CHÍNH AN TOÀN:</b> Tháng ${selectedMonth + 1} bạn còn lại <b>${balance.toLocaleString('vi-VN')} VNĐ</b> (${percentLeft}% thu nhập). Hãy duy trì nhé!`;
+  } else {
+    alertEl.style.display = 'none';
+  }
+}
+
+// ==================== 3. HÀM VẼ BIỂU ĐỒ (HIỆN THEO TỪNG NGÀY) ====================
 function updateFinanceChart(transactions = []) {
   const canvas = document.getElementById('financeChart');
   if (!canvas) return;
@@ -42,7 +116,6 @@ function updateFinanceChart(transactions = []) {
   const chiData = [0, 0, 0, 0, 0, 0, 0];
   const thuData = [0, 0, 0, 0, 0, 0, 0];
 
-  // Tạo mốc 7 ngày gần nhất
   const today = new Date();
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
@@ -51,7 +124,6 @@ function updateFinanceChart(transactions = []) {
     last7Days.push(`${dayStr}/${monthStr}`);
   }
 
-  // Phân loại dữ liệu theo từng ngày
   transactions.forEach(tx => {
     if (!tx.createdAt) return;
     
@@ -93,7 +165,7 @@ function updateFinanceChart(transactions = []) {
               borderWidth: 2,
               tension: 0.3,
               fill: true,
-              pointRadius: 5, // Điểm mút rõ ràng
+              pointRadius: 5,
               pointHoverRadius: 7
             },
             {
@@ -139,21 +211,15 @@ function updateFinanceChart(transactions = []) {
   }
 }
 
-// ==================== 3. CÁC HÀM TÍNH TOÁN & HIỂN THỊ DỮ LIỆU ====================
+// ==================== 4. HIỂN THỊ DỮ LIỆU GIAO DỊCH & NHẮC HẸN ====================
 
 function renderTransactions(transactions = []) {
   const list = document.getElementById('transaction-list');
   if (!list) return;
   list.innerHTML = '';
 
-  let totalChi = 0;
-
   transactions.forEach(tx => {
     const amount = Number(tx.amount) || 0;
-
-    if (tx.type === 'CHI' || tx.type === 'DAUTU') {
-      totalChi += amount;
-    }
 
     const row = document.createElement('tr');
     row.innerHTML = `
@@ -168,13 +234,10 @@ function renderTransactions(transactions = []) {
     list.appendChild(row);
   });
 
-  // Hiển thị Tổng Tiền Tiêu
-  const totalSpentEl = document.getElementById('total-spent');
-  if (totalSpentEl) {
-    totalSpentEl.innerText = `${totalChi.toLocaleString('vi-VN')} VNĐ`;
-  }
+  // TÍNH BÁO CÁO THÁNG & CẢNH BÁO
+  calculateMonthlyStats();
 
-  // Cập nhật biểu đồ ngay lập tức
+  // VẼ BIỂU ĐỒ 7 NGÀY
   updateFinanceChart(transactions);
 }
 
@@ -206,7 +269,6 @@ function renderReminders(reminders = []) {
       </div>
     `;
 
-    // Sự kiện nút bấm an toàn
     item.querySelector('.btn-confirm-pay').onclick = () => payReminder(rem._id, rem.title, rem.amount);
     item.querySelector('.btn-delete-rem').onclick = () => deleteReminder(rem._id);
 
@@ -214,7 +276,7 @@ function renderReminders(reminders = []) {
   });
 }
 
-// ==================== 4. THAO TÁC API / OFFLINE (KHÔNG TRÙNG HÀM) ====================
+// ==================== 5. CÁC THAO TÁC XÓA & THANH TOÁN ====================
 
 async function deleteTx(id) {
   if (confirm('Xóa giao dịch này?')) {
@@ -276,7 +338,7 @@ async function deleteReminder(id) {
   }
 }
 
-// ==================== 5. LOCALSTORAGE & FETCH DATA ====================
+// ==================== 6. LOCALSTORAGE & FETCH DATA ====================
 
 function saveToLocalStorage() {
   localStorage.setItem('transactions', JSON.stringify(allTransactions));
@@ -323,7 +385,7 @@ async function fetchData() {
     // Mẫu Dữ Liệu Ban Đầu Khi Chưa Có Gì
     allTransactions = [
       { _id: '1', telegramUserId: 0, amount: 35000, type: 'CHI', category: 'Ăn sáng', note: 'Cơm gà', source: 'BOT', createdAt: new Date().toISOString() },
-      { _id: '2', telegramUserId: 0, amount: 150000, type: 'THU', category: 'Bán đồ', note: 'Áo cũ', source: 'WEB', createdAt: new Date(Date.now() - 86400000).toISOString() },
+      { _id: '2', telegramUserId: 0, amount: 15000000, type: 'THU', category: 'Lương', note: 'Lương tháng 8', source: 'WEB', createdAt: new Date().toISOString() },
       { _id: '3', telegramUserId: 0, amount: 500000, type: 'CHI', category: 'Tiền nhà', note: 'Tháng 8', source: 'WEB', createdAt: new Date(Date.now() - 86400000 * 2).toISOString() }
     ];
     
@@ -337,7 +399,7 @@ async function fetchData() {
   }
 }
 
-// ==================== 6. LỊCH (CALENDAR) ====================
+// ==================== 7. LỊCH (CALENDAR) ====================
 
 function changeMonth(direction) {
   currentDate.setMonth(currentDate.getMonth() + direction);
@@ -382,10 +444,25 @@ function renderCalendar() {
   }
 }
 
-// ==================== 7. FORM SUBMITS & KHỞI TẠO ====================
+// ==================== 8. FORM SUBMITS & KHỞI TẠO ====================
 
 document.addEventListener('DOMContentLoaded', () => {
   startLiveClock(); 
+
+  // Mặc định chọn Tháng/Năm hiện tại ở ô chọn tháng
+  const monthInput = document.getElementById('stats-month');
+  if (monthInput) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    monthInput.value = `${year}-${month}`;
+
+    // Sự kiện khi thay đổi tháng xem báo cáo
+    monthInput.addEventListener('change', () => {
+      calculateMonthlyStats();
+    });
+  }
+
   loadFromLocalStorage();
   fetchData();
   
@@ -459,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ==================== 8. SOCKET LISTENERS ====================
+// ==================== 9. SOCKET LISTENERS ====================
 socket.on('connect', () => { fetchData(); });
 socket.on('new_transaction', () => { fetchData(); });
 socket.on('delete_transaction', () => { fetchData(); });
